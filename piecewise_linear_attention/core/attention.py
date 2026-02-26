@@ -159,6 +159,9 @@ class LinearAttention(BaseAttention):
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         """Compute linear attention using memory matrix.
 
+        Uses the efficient factorization: Q @ (K^T @ V) instead of (Q @ K^T) @ V
+        This reduces complexity from O(n^2 * d) to O(n * d^2) when n >> d.
+
         Args:
             Q: Query tensor of shape (batch, seq_len, dim)
             K: Key tensor of shape (batch, seq_len, dim)
@@ -170,36 +173,33 @@ class LinearAttention(BaseAttention):
             output: Attention output of shape (batch, seq_len, dim)
             weights: Optional attention scores (raw dot products, not normalized)
         """
-        batch_size, seq_len, dim = Q.size()
-
         if mask is not None:
             raise NotImplementedError("Masking is not yet supported for LinearAttention")
 
-        # Build memory matrix: M = sum_i (v_i ⊗ k_i^T)
-        # This is equivalent to: V^T @ K
+        # Build memory matrix: M = K^T @ V
+        # This represents M = sum_i (k_i ⊗ v_i^T)
         # Shape: (batch, dim, dim)
-        memory_matrix = torch.matmul(V.transpose(-2, -1), K)
+        # Complexity: O(n * d^2)
+        memory_matrix = torch.matmul(K.transpose(-2, -1), V)
 
-        # Query the memory matrix with each query
-        # Output = Q @ M = Q @ (V^T @ K) = (Q @ V^T) @ K... wait, this is wrong
-        # Correct: Output = M @ Q^T where M = sum(v_i ⊗ k_i^T)
-        # Actually: M(q) = sum_i v_i * <k_i, q> = (sum_i v_i ⊗ k_i^T) @ q
-        #                = V^T @ (K @ q) for each q
-        # For all queries: (K @ Q^T)^T @ V = Q @ K^T @ V (but we want per-row products)
-
-        # Compute attention scores (raw dot products, no softmax)
-        # Shape: (batch, seq_len, seq_len)
-        scores = torch.matmul(Q, K.transpose(-2, -1))
-
-        # Apply scores to values (same as standard attention but without softmax)
+        # Query the memory matrix with all queries at once
+        # Output = Q @ M = Q @ (K^T @ V)
+        # For each query q_i: output_i = sum_j v_j * <k_j, q_i>
         # Shape: (batch, seq_len, dim)
-        output = torch.matmul(scores, V)
+        # Complexity: O(n * d^2)
+        output = torch.matmul(Q, memory_matrix)
 
         # Apply dropout
         output = self.dropout(output)
 
+        # If attention weights requested, compute them (but this defeats the purpose
+        # of linear attention since it's O(n^2))
         if return_attention_weights:
+            # Compute raw scores: Q @ K^T (no softmax)
+            # Shape: (batch, seq_len, seq_len)
+            scores = torch.matmul(Q, K.transpose(-2, -1))
             return output, scores
+
         return output, None
 
 
