@@ -1,0 +1,70 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "piecewise-linear-attention"
+version = "0.1.0"
+description = "Efficient attention mechanism using piecewise linear approximation around pseudo-queries"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [
+    {name = "Thomas Grapentin", email = "grapentthomas@gmail.com"}
+]
+keywords = ["attention", "transformer", "machine learning", "deep learning", "efficient attention"]
+
+dependencies = [
+    "torch>=2.0.0",
+    "numpy>=1.20.0",
+    "scipy>=1.7.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "isort>=5.12.0",
+    "flake8>=6.0.0",
+    "mypy>=1.0.0",
+]
+benchmark = [
+    "matplotlib>=3.5.0",
+    "pandas>=1.3.0",
+    "seaborn>=0.12.0",
+]
+docs = [
+    "sphinx>=5.0.0",
+    "sphinx-rtd-theme>=1.2.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/grapentt/piecewise-linear-attention"
+Repository = "https://github.com/grapentt/piecewise-linear-attention"
+Documentation = "https://github.com/grapentt/piecewise-linear-attention/blob/main/THEORY.md"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["piecewise_linear_attention*"]
+
+[tool.black]
+line-length = 100
+target-version = ['py38', 'py39', 'py310', 'py311']
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["piecewise_linear_attention/tests"]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"
+addopts = "-v --cov=piecewise_linear_attention --cov-report=html --cov-report=term"
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
