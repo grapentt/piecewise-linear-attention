@@ -4,11 +4,11 @@
 
 ## Overview
 
-This project implements **PiecewiseAttention**, an efficient attention mechanism that achieves **8-9× speedup** over standard attention while maintaining good accuracy. Instead of computing full softmax attention for all queries or using linear attention (which has poor accuracy), we use first-order Taylor approximation around representative queries (not of the softmax itself).
+This project implements **PiecewiseAttention**, an efficient attention mechanism that achieves **up to 84× speedup** over standard attention while maintaining good accuracy. Instead of computing full softmax attention for all queries or using linear attention (which has poor accuracy), we use first-order Taylor approximation around representative queries.
 
 **Key Results:**
-- ⚡ **8.9× faster** than standard attention (at n=1024, batch=8)
-- 🎯 **30% better accuracy** than proper linear attention (52% vs 72% error)
+- ⚡ **84× faster** than standard attention (at n=4096, batch=64)
+- 🎯 **20 percentage points better accuracy** than linear attention (52% vs 72% error)
 - 💾 **Memory efficient**: O(batch · d²) instead of O(batch · n²)
 - 🚀 **Simple API**: No initialization, no clustering, just works!
 
@@ -141,20 +141,30 @@ python benchmarks/benchmark.py
 
 ## Performance Results
 
-First small-scale benchmarks run on CPU:
+Comprehensive benchmarks on CPU (Apple Silicon):
 
 **Key Findings:**
-- **Speedup scales**: 1.3× (n=256) → 10.8× (batch=16, n=1024)
-- **Consistent accuracy**: ~52% error across all configurations
-- **Best tradeoff**: 30-40% better accuracy than linear attention at comparable speed
+- **Speedup scales with batch size**: 1.6× (batch=1) → 84.2× (batch=64)
+- **Consistent accuracy**: ~52% error across all scales
+- **Best tradeoff**: 20 percentage points better accuracy than linear attention at comparable speed
 
-**Example at n=1024, batch=8, dim=64:**
+**Medium scale: batch=16, n=1024, dim=64:**
 
-| Method | Time (ms) | Speedup | Error |
-|--------|-----------|---------|-------|
-| StandardAttention | 4.32 | 1.0× | 0% |
-| LinearAttention (ReLU) | 0.46 | 9.5× | 72% |
-| **PiecewiseAttention** | **0.48** | **9.0×** | **52%** ✅ |
+| Method | Time (ms) | Speedup | Error | Memory (MB) |
+|--------|-----------|---------|-------|-------------|
+| StandardAttention | 8.94 | 1.0× | 0% | 462 |
+| LinearAttention (ReLU) | 0.76 | 11.9× | 72% | 474 |
+| **PiecewiseAttention** | **0.84** | **10.7×** | **52%** | **474** ✅ |
+
+**Very large scale: batch=64, n=4096, dim=64** (16.8M elements):
+
+| Method | Time (ms) | Speedup | Error | Memory (MB) |
+|--------|-----------|---------|-------|-------------|
+| StandardAttention | 895.13 | 1.0× | 0% | 4614 |
+| LinearAttention (ReLU) | 11.76 | 76.1× | 72% | 778 |
+| **PiecewiseAttention** | **10.64** | **84.2×** | **52%** | **785** ✅ |
+
+Memory profiling validates O(d²) complexity (constant with sequence length). See [benchmarks](benchmarks/) for details.
 
 ## Contributing
 
@@ -200,7 +210,7 @@ If you use this code in your research, please cite:
 @software{piecewise_linear_attention,
   title = {Piecewise Linear Attention: Efficient Attention Approximation},
   year = {2026},
-  url = {https://github.com/yourusername/piecewise-linear-attention}
+  url = {https://github.com/grapentt/piecewise-linear-attention}
 }
 ```
 
