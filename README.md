@@ -4,7 +4,7 @@
 
 ## Overview
 
-This project implements **PiecewiseAttention**, an efficient attention mechanism that achieves **8-9× speedup** over standard attention while maintaining good accuracy. Instead of computing full softmax attention for all queries or using linear attention (which has poor accuracy), we use first-order Taylor approximation around representative queries.
+This project implements **PiecewiseAttention**, an efficient attention mechanism that achieves **8-9× speedup** over standard attention while maintaining good accuracy. Instead of computing full softmax attention for all queries or using linear attention (which has poor accuracy), we use first-order Taylor approximation around representative queries (not of the softmax itself).
 
 **Key Results:**
 - ⚡ **8.9× faster** than standard attention (at n=1024, batch=8)
