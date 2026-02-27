@@ -200,7 +200,7 @@ If you use this code in your research, please cite:
 @software{piecewise_linear_attention,
   title = {Piecewise Linear Attention: Efficient Attention Approximation},
   year = {2026},
-  url = {https://github.com/yourusername/piecewise-linear-attention}
+  url = {https://github.com/grapentt/piecewise-linear-attention}
 }
 ```
 
