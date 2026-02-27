@@ -215,8 +215,8 @@ class TestCorrectnessVsSequential:
         K = torch.randn(batch, seq_len, dim)
         V = torch.randn(batch, seq_len, dim)
 
-        attention = PerSamplePiecewiseAttention(
-            dim=dim, pseudo_query_method="mean", dropout=0.0, scale=True
+        attention = PiecewiseAttention(
+            dim=dim, dropout=0.0, scale=True
         )
 
         # Batched computation
@@ -316,8 +316,8 @@ class TestApproximationQuality:
         standard_output, _ = standard_attn(Q, K, V)
 
         # Per-sample piecewise
-        piecewise_attn = PerSamplePiecewiseAttention(
-            dim=dim, pseudo_query_method="mean", dropout=0.0, scale=True
+        piecewise_attn = PiecewiseAttention(
+            dim=dim, dropout=0.0, scale=True
         )
         piecewise_output, _ = piecewise_attn(Q, K, V)
 
@@ -351,8 +351,8 @@ class TestApproximationQuality:
         standard_attn = StandardAttention(dim=dim, dropout=0.0, scale=True)
 
         # Per-sample piecewise
-        piecewise_attn = PerSamplePiecewiseAttention(
-            dim=dim, pseudo_query_method="mean", dropout=0.0, scale=True
+        piecewise_attn = PiecewiseAttention(
+            dim=dim, dropout=0.0, scale=True
         )
 
         # Error with similar queries

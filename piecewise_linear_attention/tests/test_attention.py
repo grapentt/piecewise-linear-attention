@@ -48,11 +48,11 @@ class TestStandardAttention:
         assert output.dtype == Q.dtype
 
     def test_return_attention_weights(self, attention, sample_inputs):
-        """Test that attention weights are returned when requested."""
+        """Test that attention weights are returned."""
         Q, K, V = sample_inputs
         batch_size, seq_len, _ = Q.shape
 
-        output, weights = attention(Q, K, V, return_attention_weights=True)
+        output, weights = attention(Q, K, V)
 
         assert weights is not None, "Attention weights should be returned"
         assert weights.shape == (batch_size, seq_len, seq_len)
@@ -60,7 +60,7 @@ class TestStandardAttention:
     def test_attention_weights_sum_to_one(self, attention, sample_inputs):
         """Test that attention weights sum to 1 across key dimension."""
         Q, K, V = sample_inputs
-        _, weights = attention(Q, K, V, return_attention_weights=True)
+        _, weights = attention(Q, K, V)
 
         # Sum over the key dimension (last dimension)
         weight_sums = weights.sum(dim=-1)
@@ -71,7 +71,7 @@ class TestStandardAttention:
     def test_attention_weights_positive(self, attention, sample_inputs):
         """Test that attention weights are non-negative."""
         Q, K, V = sample_inputs
-        _, weights = attention(Q, K, V, return_attention_weights=True)
+        _, weights = attention(Q, K, V)
 
         assert (weights >= 0).all(), "Attention weights should be non-negative"
 
@@ -82,8 +82,8 @@ class TestStandardAttention:
         attn_scaled = StandardAttention(dim=64, scale=True)
         attn_unscaled = StandardAttention(dim=64, scale=False)
 
-        _, weights_scaled = attn_scaled(Q, K, V, return_attention_weights=True)
-        _, weights_unscaled = attn_unscaled(Q, K, V, return_attention_weights=True)
+        _, weights_scaled = attn_scaled(Q, K, V)
+        _, weights_unscaled = attn_unscaled(Q, K, V)
 
         # Scaled attention should have different (typically less peaked) distribution
         assert not torch.allclose(weights_scaled, weights_unscaled)
@@ -102,7 +102,7 @@ class TestStandardAttention:
         mask = torch.ones(batch_size, seq_len, seq_len)
         mask[0, 0, 3:] = 0  # Mask positions 3 and 4 for first query
 
-        _, weights = attention(Q, K, V, mask=mask, return_attention_weights=True)
+        _, weights = attention(Q, K, V, mask=mask)
 
         # Check that masked positions have near-zero attention
         assert torch.allclose(
@@ -124,7 +124,7 @@ class TestStandardAttention:
         # Create causal mask (lower triangular)
         causal_mask = torch.tril(torch.ones(seq_len, seq_len)).unsqueeze(0)
 
-        _, weights = attention(Q, K, V, mask=causal_mask, return_attention_weights=True)
+        _, weights = attention(Q, K, V, mask=causal_mask)
 
         # Check that upper triangle (future positions) have zero attention
         for i in range(seq_len):
@@ -142,7 +142,7 @@ class TestStandardAttention:
         dim = 64
 
         X = torch.randn(batch_size, seq_len, dim)
-        output, weights = attention(X, X, X, return_attention_weights=True)
+        output, weights = attention(X, X, X)
 
         # Weights should be symmetric-ish for self-attention with same Q, K
         # But not exactly due to softmax
@@ -159,7 +159,7 @@ class TestStandardAttention:
         K = torch.randn(batch_size, seq_len, dim)
         V = torch.randn(batch_size, seq_len, dim)
 
-        output, weights = attention(Q, K, V, return_attention_weights=True)
+        output, weights = attention(Q, K, V)
 
         # With single token, attention weight should be 1.0
         assert torch.allclose(weights, torch.ones_like(weights))
