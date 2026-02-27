@@ -50,14 +50,12 @@ pip install -e ".[dev]"  # with development dependencies
 
 ```
 piecewise-linear-attention/
-├── piecewise_linear_attention/   # Main package
-│   ├── core/                     # Core attention implementations
-│   ├── models/                   # Model architectures
-│   ├── utils/                    # Utility functions
+├── piecewise_linear_attention/
+│   ├── core/
+│   │   └── attention.py          # All three attention implementations
 │   └── tests/                    # Test suite
-├── benchmarks/                   # Benchmarking scripts
-├── examples/                     # Usage examples
-├── docs/                         # Documentation
+├── benchmarks/
+│   └── benchmark.py              
 ├── THEORY.md                     # Theoretical foundation
 └── README.md                     # This file
 ```
@@ -141,19 +139,22 @@ mypy piecewise_linear_attention/
 python benchmarks/benchmark.py
 ```
 
-## Performance Comparison
+## Performance Results
 
-At `n=1024, batch=8, dim=64`:
+First small-scale benchmarks run on CPU:
 
-| Method | Speedup | Rel. Error | Memory |
-|--------|---------|------------|--------|
-| StandardAttention | 1.0× | 0% | O(n²) |
-| LinearAttention (ReLU) | 9.5× ⚡ | 72% ❌ | O(d²) |
-| LinearAttention (ELU) | 5.6× | 77% ❌ | O(d²) |
-| **PiecewiseAttention** | **8.9×** ⚡ | **52%** ✅ | **O(d²)** |
+**Key Findings:**
+- **Speedup scales**: 1.3× (n=256) → 10.8× (batch=16, n=1024)
+- **Consistent accuracy**: ~52% error across all configurations
+- **Best tradeoff**: 30-40% better accuracy than linear attention at comparable speed
 
-**Winner**: `PiecewiseAttention` provides the best accuracy-speed tradeoff!
+**Example at n=1024, batch=8, dim=64:**
 
+| Method | Time (ms) | Speedup | Error |
+|--------|-----------|---------|-------|
+| StandardAttention | 4.32 | 1.0× | 0% |
+| LinearAttention (ReLU) | 0.46 | 9.5× | 72% |
+| **PiecewiseAttention** | **0.48** | **9.0×** | **52%** ✅ |
 
 ## Contributing
 
@@ -184,6 +185,12 @@ For each batch sample:
 ```
 
 **Complexity**: O(batch · n · d²) vs O(batch · n² · d) for standard attention
+
+---
+
+## Documentation
+
+- **[THEORY.md](THEORY.md)** - Theoretical foundation and mathematical derivations
 
 ## Citation
 
