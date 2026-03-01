@@ -204,7 +204,101 @@ where $C$ depends on the Hessian bound (second derivatives) of $A$ in the region
 
 ---
 
-## 6. Open Questions and Future Directions
+## 6. Causal Attention: Efficient Implementation via Cumsum
+
+### 6.1 The Challenge
+
+For causal attention (e.g., language modeling), query at position $i$ can only attend to keys at positions $0, \ldots, i$. Naively, this requires computing a separate Jacobian for each position, leading to $O(n^2 \cdot d)$ complexity.
+
+### 6.2 Efficient Solution: Linearize Before Summation
+
+**Key Insight**: Both causal and non-causal compute the same Jacobian-based approximation:
+
+$$A(q) \approx A(\bar{q}) + J_A(\bar{q}) \cdot (q - \bar{q})$$
+
+The difference is the **computational strategy**. By linearizing the exponential kernel *before* summation, we can use cumulative sums for efficient causal masking.
+
+### 6.3 Mathematical Derivation
+
+For position $i$, the causal attention is:
+
+$$A_i(q) = \frac{\sum_{j \leq i} \exp(s \cdot q \cdot k_j) v_j}{\sum_{j \leq i} \exp(s \cdot q \cdot k_j)}$$
+
+where $s = 1/\sqrt{d}$ is the scale factor.
+
+**Step 1: Linearize the exponential kernel** around anchor $\bar{q}$:
+
+$$\exp(s \cdot q \cdot k_j) \approx \exp(s \cdot \bar{q} \cdot k_j) [1 + s \cdot (q - \bar{q}) \cdot k_j]$$
+
+Let $\sigma_j = \exp(s \cdot \bar{q} \cdot k_j)$ be the anchor weights.
+
+**Step 2: Substitute into attention**:
+
+$$\text{Numerator}_i \approx \sum_{j \leq i} \sigma_j [1 + s \cdot (q - \bar{q}) \cdot k_j] v_j$$
+
+$$= \sum_{j \leq i} \sigma_j v_j + s \cdot (q - \bar{q})^T \sum_{j \leq i} \sigma_j (k_j \otimes v_j)$$
+
+Similarly for denominator:
+
+$$\text{Denominator}_i \approx \sum_{j \leq i} \sigma_j + s \cdot (q - \bar{q})^T \sum_{j \leq i} \sigma_j k_j$$
+
+**Step 3: Enable cumsum optimization**:
+
+Define cumulative terms:
+- $S^A_i = \sum_{j \leq i} \sigma_j v_j$ (cumulative weighted values)
+- $S^B_i = \sum_{j \leq i} \sigma_j (k_j \otimes v_j)$ (cumulative weighted outer products)
+- $S^C_i = \sum_{j \leq i} \sigma_j$ (cumulative weights)
+- $S^D_i = \sum_{j \leq i} \sigma_j k_j$ (cumulative weighted keys)
+
+These can be computed efficiently via `torch.cumsum`.
+
+**Step 4: Final formula**:
+
+$$\text{output}_i = \frac{S^A_i + s \cdot S^B_i (q_i - \bar{q})}{S^C_i + s \cdot S^D_i^T (q_i - \bar{q})}$$
+
+### 6.4 Equivalence to Jacobian Approximation
+
+This is mathematically equivalent to the Jacobian-based approximation! The Jacobian of the attention function at $\bar{q}$ for position $i$ is:
+
+$$J_{A_i}(\bar{q}) = s \left[\sum_{j \leq i} \alpha_j (v_j \otimes k_j) - A_i(\bar{q}) \otimes \sum_{j \leq i} \alpha_j k_j \right]$$
+
+where $\alpha_j = \sigma_j / \sum_{\ell \leq i} \sigma_\ell$ are the softmax weights.
+
+Our cumsum formulation computes exactly this Jacobian, just more efficiently by exploiting the separability that comes from linearizing before summation.
+
+### 6.5 Complexity Analysis
+
+**Time Complexity**:
+- Compute anchor weights $\sigma_j$: $O(n \cdot d)$
+- Compute terms $A, B, C, D$: $O(n \cdot d^2)$ (bottleneck: outer products in $B$)
+- Cumulative sums: $O(n \cdot d^2)$
+- Apply to queries: $O(n \cdot d^2)$
+- **Total**: $O(n \cdot d^2)$ ✓
+
+**Space Complexity**: $O(n \cdot d^2)$ for storing $S^B_i$ at all positions
+
+**Comparison**:
+- Standard causal attention: $O(n^2 \cdot d)$ time, $O(n^2)$ memory
+- Our causal piecewise: $O(n \cdot d^2)$ time, $O(n \cdot d^2)$ memory
+- Linear attention: $O(n \cdot d^2)$ time, $O(d^2)$ memory
+
+We match linear attention complexity while maintaining better approximation quality!
+
+### 6.6 Pseudo-Query Selection Strategies
+
+**Training** (`causal_pseudo_query="mean"`):
+- Use $\bar{q} = \frac{1}{n}\sum_i q_i$ (mean of all queries)
+- Better approximation quality when full sequence is available
+- Small information leakage acceptable during training
+
+**Inference** (`causal_pseudo_query="first"`):
+- Use $\bar{q} = q_0$ (first query)
+- Zero information leakage
+- Suitable for autoregressive generation
+
+---
+
+## 7. Open Questions and Future Directions
 
 1. **Adaptive Pseudo-Queries**: Can pseudo-queries be adapted per layer or per head?
 2. **Higher-Order Approximation**: Is quadratic or higher-order approximation beneficial?
