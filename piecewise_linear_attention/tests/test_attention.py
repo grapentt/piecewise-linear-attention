@@ -88,8 +88,8 @@ class TestStandardAttention:
         # Scaled attention should have different (typically less peaked) distribution
         assert not torch.allclose(weights_scaled, weights_unscaled)
 
-    def test_masking(self, attention):
-        """Test that masking correctly zeros out attention to masked positions."""
+    def test_non_causal_attention(self, attention):
+        """Test bidirectional (non-causal) attention can attend to all positions."""
         batch_size = 2
         seq_len = 5
         dim = 64
@@ -98,20 +98,14 @@ class TestStandardAttention:
         K = torch.randn(batch_size, seq_len, dim)
         V = torch.randn(batch_size, seq_len, dim)
 
-        # Create a mask that masks out the last 2 positions for the first query
-        mask = torch.ones(batch_size, seq_len, seq_len)
-        mask[0, 0, 3:] = 0  # Mask positions 3 and 4 for first query
+        # Non-causal attention (default)
+        _, weights = attention(Q, K, V)
 
-        _, weights = attention(Q, K, V, mask=mask)
+        # Check that all positions have non-zero attention (no masking)
+        # First query should attend to all keys including future ones
+        assert (weights[0, 0, :] > 0).all(), "Non-causal attention should attend to all positions"
 
-        # Check that masked positions have near-zero attention
-        assert torch.allclose(
-            weights[0, 0, 3:],
-            torch.zeros(2),
-            atol=1e-6,
-        ), "Masked positions should have zero attention"
-
-    def test_causal_mask(self, attention):
+    def test_causal_mask(self):
         """Test causal masking (prevents attending to future positions)."""
         batch_size = 1
         seq_len = 5
@@ -121,10 +115,9 @@ class TestStandardAttention:
         K = torch.randn(batch_size, seq_len, dim)
         V = torch.randn(batch_size, seq_len, dim)
 
-        # Create causal mask (lower triangular)
-        causal_mask = torch.tril(torch.ones(seq_len, seq_len)).unsqueeze(0)
-
-        _, weights = attention(Q, K, V, mask=causal_mask)
+        # Use causal parameter
+        attention_causal = StandardAttention(dim=dim, scale=True, causal=True)
+        _, weights = attention_causal(Q, K, V)
 
         # Check that upper triangle (future positions) have zero attention
         for i in range(seq_len):
@@ -267,13 +260,28 @@ class TestLinearAttention:
         # Should give different results (linear doesn't use softmax)
         assert not torch.allclose(output_standard, output_linear)
 
-    def test_mask_not_supported(self, attention, sample_inputs):
-        """Test that masking raises NotImplementedError."""
-        Q, K, V = sample_inputs
-        mask = torch.ones(2, 10, 10)
+    def test_causal_mode(self):
+        """Test that LinearAttention supports causal mode."""
+        batch_size = 2
+        seq_len = 10
+        dim = 64
 
-        with pytest.raises(NotImplementedError):
-            attention(Q, K, V, mask=mask)
+        Q = torch.randn(batch_size, seq_len, dim)
+        K = torch.randn(batch_size, seq_len, dim)
+        V = torch.randn(batch_size, seq_len, dim)
+
+        # Test non-causal
+        attn_noncausal = LinearAttention(dim=dim, causal=False)
+        output_noncausal, _ = attn_noncausal(Q, K, V)
+        assert output_noncausal.shape == (batch_size, seq_len, dim)
+
+        # Test causal
+        attn_causal = LinearAttention(dim=dim, causal=True)
+        output_causal, _ = attn_causal(Q, K, V)
+        assert output_causal.shape == (batch_size, seq_len, dim)
+
+        # Outputs should be different
+        assert not torch.allclose(output_noncausal, output_causal)
 
 
 if __name__ == "__main__":
