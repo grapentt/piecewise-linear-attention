@@ -35,7 +35,6 @@ class BaseAttention(nn.Module, ABC):
         Q: torch.Tensor,
         K: torch.Tensor,
         V: torch.Tensor,
-        mask: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         """Compute attention output.
 
@@ -43,7 +42,6 @@ class BaseAttention(nn.Module, ABC):
             Q: Query tensor of shape (batch, seq_len, dim)
             K: Key tensor of shape (batch, seq_len, dim)
             V: Value tensor of shape (batch, seq_len, dim)
-            mask: Optional attention mask
 
         Returns:
             output: Attention output of shape (batch, seq_len, dim)
@@ -61,30 +59,38 @@ class StandardAttention(BaseAttention):
     Memory: O(batch * n^2)
     """
 
-    def __init__(self, dim: int, dropout: float = 0.0, scale: bool = True):
+    def __init__(self, dim: int, dropout: float = 0.0, scale: bool = True, causal: bool = False):
         """Initialize standard attention.
 
         Args:
             dim: Dimension of the input embeddings
             dropout: Dropout probability for attention weights
             scale: Whether to scale attention scores by sqrt(d)
+            causal: If True, apply causal masking (query i can only attend to keys 0...i)
         """
         super().__init__(dim, dropout)
         self.scale = scale
+        self.causal = causal
 
     def forward(
         self,
         Q: torch.Tensor,
         K: torch.Tensor,
         V: torch.Tensor,
-        mask: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Compute standard softmax attention.
+
+        Args:
+            Q: Query tensor of shape (batch, seq_len, dim)
+            K: Key tensor of shape (batch, seq_len, dim)
+            V: Value tensor of shape (batch, seq_len, dim)
 
         Returns:
             output: Attention output of shape (batch, seq_len, dim)
             attn_weights: Attention weights of shape (batch, seq_len, seq_len)
         """
+        _, seq_len, _ = Q.shape
+
         # Compute attention scores: Q @ K^T
         scores = torch.matmul(Q, K.transpose(-2, -1))
 
@@ -92,9 +98,11 @@ class StandardAttention(BaseAttention):
         if self.scale:
             scores = scores / math.sqrt(self.dim)
 
-        # Apply mask if provided
-        if mask is not None:
-            scores = scores.masked_fill(mask == 0, -1e9)
+        # Apply causal mask if enabled
+        if self.causal:
+            # Create causal mask: lower triangular matrix (1 for allowed, 0 for blocked)
+            causal_mask = torch.tril(torch.ones(seq_len, seq_len, device=Q.device))
+            scores = scores.masked_fill(causal_mask == 0, -1e9)
 
         # Apply softmax
         attn_weights = F.softmax(scores, dim=-1)
@@ -122,20 +130,23 @@ class LinearAttention(BaseAttention):
         self,
         dim: int,
         dropout: float = 0.0,
-        kernel: str = "elu",
+        kernel_type: str = "elu",
         eps: float = 1e-6,
+        causal: bool = False,
     ):
         """Initialize linear attention.
 
         Args:
             dim: Dimension of the input embeddings
             dropout: Dropout probability
-            kernel: Kernel function ('elu', 'relu', 'softplus')
+            kernel_type: Kernel function ('elu', 'relu', 'softplus')
             eps: Small constant for numerical stability
+            causal: If True, use causal masking (query i can only attend to keys 0...i)
         """
         super().__init__(dim, dropout)
-        self.kernel = kernel
+        self.kernel = kernel_type
         self.eps = eps
+        self.causal = causal
 
     def feature_map(self, x: torch.Tensor) -> torch.Tensor:
         """Apply kernel feature map φ(x) to approximate softmax.
@@ -163,35 +174,56 @@ class LinearAttention(BaseAttention):
         Q: torch.Tensor,
         K: torch.Tensor,
         V: torch.Tensor,
-        mask: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Compute linear attention with kernel feature maps.
+
+        Args:
+            Q: Query tensor of shape (batch, seq_len, dim)
+            K: Key tensor of shape (batch, seq_len, dim)
+            V: Value tensor of shape (batch, seq_len, dim)
 
         Returns:
             output: Attention output of shape (batch, seq_len, dim)
             normalization: Normalization terms of shape (batch, seq_len, 1)
         """
-        if mask is not None:
-            raise NotImplementedError("Masking not yet supported for LinearAttention")
-
         # Apply feature maps
-        Q_prime = self.feature_map(Q)
-        K_prime = self.feature_map(K)
+        Q_prime = self.feature_map(Q)  # (batch, seq_len, dim)
+        K_prime = self.feature_map(K)  # (batch, seq_len, dim)
 
-        # Build memory matrix: M = K'^T @ V
-        # Shape: (batch, dim, dim)
-        memory_matrix = torch.matmul(K_prime.transpose(-2, -1), V)
+        if self.causal:
+            # Causal masking using cumulative sum
+            # For each query position i, we can only attend to keys 0...i
 
-        # Compute numerator: φ(Q) @ M
-        # Shape: (batch, seq_len, dim)
-        numerator = torch.matmul(Q_prime, memory_matrix)
+            # Compute cumulative key-value products: cumsum(K' ⊙ V)
+            # Shape: (batch, seq_len, dim, dim)
+            k_prime_v = torch.einsum('bnd,bnm->bndm', K_prime, V)
+            # Cumulative sum along sequence dimension
+            k_prime_v_cumsum = torch.cumsum(k_prime_v, dim=1)
 
-        # Compute normalization: φ(Q) @ φ(K)^T @ 1
-        # Shape: (batch, seq_len, 1)
-        normalization = torch.matmul(
-            Q_prime,
-            K_prime.sum(dim=1, keepdim=True).transpose(-2, -1)
-        )
+            # Compute numerator: Q'[i] @ cumsum(K'[j] ⊙ V[j] for j <= i)
+            # Shape: (batch, seq_len, dim)
+            numerator = torch.einsum('bnd,bndm->bnm', Q_prime, k_prime_v_cumsum)
+
+            # Compute normalization: Q'[i] @ cumsum(K'[j] for j <= i)
+            # Shape: (batch, seq_len, 1)
+            k_prime_cumsum = torch.cumsum(K_prime, dim=1)
+            normalization = torch.einsum('bnd,bnd->bn', Q_prime, k_prime_cumsum).unsqueeze(-1)
+        else:
+            # Non-causal linear attention (original implementation)
+            # Build memory matrix: M = K'^T @ V
+            # Shape: (batch, dim, dim)
+            memory_matrix = torch.matmul(K_prime.transpose(-2, -1), V)
+
+            # Compute numerator: φ(Q) @ M
+            # Shape: (batch, seq_len, dim)
+            numerator = torch.matmul(Q_prime, memory_matrix)
+
+            # Compute normalization: φ(Q) @ φ(K)^T @ 1
+            # Shape: (batch, seq_len, 1)
+            normalization = torch.matmul(
+                Q_prime,
+                K_prime.sum(dim=1, keepdim=True).transpose(-2, -1)
+            )
 
         # Normalize output
         output = numerator / (normalization + self.eps)
@@ -203,14 +235,20 @@ class LinearAttention(BaseAttention):
 class PiecewiseAttention(BaseAttention):
     """Piecewise linear attention using first-order Taylor approximation.
 
-    Algorithm:
-        For each batch sample:
-        1. Select representative query q̃ (default: mean of all queries)
-        2. Compute exact softmax attention A(q̃) and analytical Jacobian J
-        3. For each query q: output ≈ A(q̃) + J @ (q - q̃)
+    Both causal and non-causal modes compute the same Jacobian-based
+    approximation: A(q) ≈ A(q̃) + J_A(q̃) @ (q - q̃)
 
-    Complexity: O(batch * n * d^2)
-    Memory: O(batch * d^2)
+    The difference is computational strategy:
+    - Non-causal: Computes Jacobian explicitly via chain rule. One Jacobian
+                  shared by all positions. O(batch * d²) memory.
+    - Causal: Computes Jacobian implicitly by linearizing exp(q·k) before
+              summation, enabling efficient cumsum for position-dependent
+              masking. One Jacobian per position. O(batch * n * d²) memory.
+
+    The causal implementation linearizes the exponential kernel first, which
+    mathematically gives the same Jacobian but enables cumsum optimization.
+
+    Complexity: O(batch * n * d²) for both modes
     """
 
     def __init__(
@@ -219,6 +257,8 @@ class PiecewiseAttention(BaseAttention):
         dropout: float = 0.0,
         scale: bool = True,
         pseudo_query_fn: Optional[Callable[[torch.Tensor], torch.Tensor]] = None,
+        causal: bool = False,
+        causal_pseudo_query: str = "mean",
     ):
         """Initialize piecewise attention.
 
@@ -228,10 +268,18 @@ class PiecewiseAttention(BaseAttention):
             scale: Whether to scale attention scores by sqrt(d)
             pseudo_query_fn: Optional custom function to select pseudo-query.
                            Signature: fn(Q: (batch, seq_len, dim)) -> (batch, dim)
-                           Default: mean of all queries per sample
+                           Default: mean of all queries per sample (non-causal mode)
+            causal: If True, use causal masking (query i can only attend to keys 0...i)
+            causal_pseudo_query: Strategy for selecting pseudo-query in causal mode.
+                               "mean": mean of all queries (best for training with full sequence)
+                               "first": first query (best for autoregressive inference)
         """
         super().__init__(dim, dropout)
         self.scale = scale
+        self.causal = causal
+        self.causal_pseudo_query = causal_pseudo_query
+        if causal_pseudo_query not in ("mean", "first"):
+            raise ValueError(f"causal_pseudo_query must be 'mean' or 'first', got {causal_pseudo_query}")
         self.pseudo_query_fn = pseudo_query_fn or self._default_pseudo_query
 
     def _default_pseudo_query(self, Q: torch.Tensor) -> torch.Tensor:
@@ -253,7 +301,6 @@ class PiecewiseAttention(BaseAttention):
         pseudo_query: torch.Tensor,
         K: torch.Tensor,
         V: torch.Tensor,
-        mask: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Compute exact attention output and Jacobian at pseudo-query.
 
@@ -264,22 +311,17 @@ class PiecewiseAttention(BaseAttention):
             pseudo_query: Representative query, shape (batch, dim)
             K: Key tensor of shape (batch, seq_len, dim)
             V: Value tensor of shape (batch, seq_len, dim)
-            mask: Optional mask of shape (batch, seq_len) where 0 masks out
 
         Returns:
             output: Attention output at pseudo-query, shape (batch, dim)
             jacobian: Jacobian matrix at pseudo-query, shape (batch, dim, dim)
         """
-        batch, seq_len, dim = K.shape
+        _, _, dim = K.shape
         scale_factor = 1.0 / math.sqrt(dim) if self.scale else 1.0
 
         # Compute attention scores: (batch, seq_len)
         scores = torch.einsum('bd,bnd->bn', pseudo_query, K)
         scores = scores * scale_factor
-
-        # Apply mask if provided
-        if mask is not None:
-            scores = scores.masked_fill(mask == 0, -1e9)
 
         # Compute attention weights: (batch, seq_len)
         attn_weights = torch.softmax(scores, dim=-1)
@@ -310,7 +352,6 @@ class PiecewiseAttention(BaseAttention):
         Q: torch.Tensor,
         K: torch.Tensor,
         V: torch.Tensor,
-        mask: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Compute piecewise linear attention.
 
@@ -318,37 +359,96 @@ class PiecewiseAttention(BaseAttention):
             Q: Query tensor of shape (batch, seq_len, dim)
             K: Key tensor of shape (batch, seq_len, dim)
             V: Value tensor of shape (batch, seq_len, dim)
-            mask: Optional mask of shape (batch, seq_len) where 0 masks out
 
         Returns:
             output: Attention output of shape (batch, seq_len, dim)
             pseudo_queries: Representative queries used, shape (batch, dim)
         """
-        batch, seq_len, dim = Q.shape
+        _, _, dim = Q.shape
 
-        # Step 1: Select representative query for each batch sample
-        pseudo_queries = self.pseudo_query_fn(Q)  # (batch, dim)
+        if self.causal:
+            # Causal piecewise attention: Jacobian computation via cumsum
+            # Complexity: O(n·d²) vs O(n²·d) naive causal attention
 
-        # Step 2: Compute exact attention and Jacobian at pseudo-queries
-        pseudo_outputs, jacobians = self._compute_attention_and_jacobian(
-            pseudo_queries, K, V, mask
-        )  # (batch, dim), (batch, dim, dim)
+            scale_factor = 1.0 / math.sqrt(dim) if self.scale else 1.0
 
-        # Step 3: Apply first-order Taylor approximation to all queries
-        # output[b, i] = pseudo_outputs[b] + jacobians[b] @ (Q[b, i] - pseudo_queries[b])
+            # Step 1: Select fixed anchor query q̄
+            if self.causal_pseudo_query == "mean":
+                # Use mean of ALL queries (best for training with full sequence)
+                q_bar = Q.mean(dim=1)  # (batch, dim)
+            elif self.causal_pseudo_query == "first":
+                # Use first query (best for autoregressive inference)
+                q_bar = Q[:, 0, :]  # (batch, dim)
 
-        # Compute deltas: Q - pseudo_queries
-        # Shape: (batch, seq_len, dim)
-        deltas = Q - pseudo_queries.unsqueeze(1)
+            # Step 2: Compute anchor attention scores s_j = exp(q̄·k_j / √d)
+            # Shape: (batch, seq_len)
+            anchor_scores = torch.einsum('bd,bnd->bn', q_bar, K) * scale_factor
+            s = torch.exp(anchor_scores)  # (batch, seq_len)
 
-        # Apply Jacobian to deltas: J @ Δq
-        # Use einsum for efficient batched matrix-vector multiplication
-        # Shape: (batch, seq_len, dim)
-        jacobian_deltas = torch.einsum('bij,bsj->bsi', jacobians, deltas)
+            # Step 3: Precompute cumsum terms (all independent of q_i!)
+            # A_j = s_j * v_j  (weighted values)
+            A = s.unsqueeze(-1) * V  # (batch, seq_len, dim)
 
-        # Final output: A(q̃) + J @ Δq
-        # Shape: (batch, seq_len, dim)
-        output = pseudo_outputs.unsqueeze(1) + jacobian_deltas
+            # B_j = s_j * (k_j ⊗ v_j)  (weighted outer products for numerator)
+            # Shape: (batch, seq_len, dim, dim)
+            B = torch.einsum('bn,bni,bnj->bnij', s, K, V)
+
+            # C_j = s_j  (weighted counts for denominator)
+            C = s  # (batch, seq_len)
+
+            # D_j = s_j * k_j  (weighted keys for denominator)
+            D = s.unsqueeze(-1) * K  # (batch, seq_len, dim)
+
+            # Step 4: Apply cumulative sum along sequence dimension
+            # These give us Σ_{j=1}^i for each position i
+            S_A = torch.cumsum(A, dim=1)  # (batch, seq_len, dim)
+            S_B = torch.cumsum(B, dim=1)  # (batch, seq_len, dim, dim)
+            S_C = torch.cumsum(C, dim=1)  # (batch, seq_len)
+            S_D = torch.cumsum(D, dim=1)  # (batch, seq_len, dim)
+
+            # Step 5: Compute query deltas
+            delta_q = Q - q_bar.unsqueeze(1)  # (batch, seq_len, dim)
+
+            # Step 6: Compute numerator for each position i
+            # Numerator_i = S^A_i + scale_factor * S^B_i @ (q_i - q̄)
+            # Shape: (batch, seq_len, dim)
+            numerator = S_A + scale_factor * torch.einsum('bnij,bnj->bni', S_B, delta_q)
+
+            # Step 7: Compute denominator for each position i
+            # Denominator_i = S^C_i + scale_factor * (q_i - q̄) @ S^D_i
+            # Shape: (batch, seq_len)
+            denominator = S_C + scale_factor * torch.einsum('bni,bni->bn', delta_q, S_D)
+
+            # Step 8: Normalize
+            output = numerator / (denominator.unsqueeze(-1) + 1e-6)
+
+            # Return anchor query as pseudo_queries for API compatibility
+            pseudo_queries = q_bar
+        else:
+            # Non-causal piecewise attention (original implementation)
+            # Step 1: Select representative query for each batch sample
+            pseudo_queries = self.pseudo_query_fn(Q)  # (batch, dim)
+
+            # Step 2: Compute exact attention and Jacobian at pseudo-queries
+            pseudo_outputs, jacobians = self._compute_attention_and_jacobian(
+                pseudo_queries, K, V
+            )  # (batch, dim), (batch, dim, dim)
+
+            # Step 3: Apply first-order Taylor approximation to all queries
+            # output[b, i] = pseudo_outputs[b] + jacobians[b] @ (Q[b, i] - pseudo_queries[b])
+
+            # Compute deltas: Q - pseudo_queries
+            # Shape: (batch, seq_len, dim)
+            deltas = Q - pseudo_queries.unsqueeze(1)
+
+            # Apply Jacobian to deltas: J @ Δq
+            # Use einsum for efficient batched matrix-vector multiplication
+            # Shape: (batch, seq_len, dim)
+            jacobian_deltas = torch.einsum('bij,bsj->bsi', jacobians, deltas)
+
+            # Final output: A(q̃) + J @ Δq
+            # Shape: (batch, seq_len, dim)
+            output = pseudo_outputs.unsqueeze(1) + jacobian_deltas
 
         # Apply dropout
         output = self.dropout(output)
