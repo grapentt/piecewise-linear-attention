@@ -264,9 +264,6 @@ class LinearAttention(BaseAttention):
         # Use compiled version if available and enabled
         if self.use_compile and hasattr(self, '_compiled_forward'):
             output, normalization = self._compiled_forward(Q, K, V)
-            # Clone output to prevent CUDA graph aliasing issues
-            # CUDA graphs cache tensors and don't allow modification after return
-            output = output.clone()
         else:
             output, normalization = self._forward_impl(Q, K, V)
 
@@ -280,7 +277,9 @@ class LinearAttention(BaseAttention):
                 # Only compile on CUDA for best results
                 # CPU compilation has more dependencies and limited benefit
                 if torch.cuda.is_available():
-                    self._compiled_forward = torch.compile(self._forward_impl, mode="reduce-overhead")
+                    # Use "default" mode instead of "reduce-overhead" to avoid CUDA graphs
+                    # CUDA graphs are too restrictive for multi-head attention with varying inputs
+                    self._compiled_forward = torch.compile(self._forward_impl, mode="default")
                     return True
                 else:
                     # Disable compilation on CPU
@@ -554,9 +553,6 @@ class PiecewiseAttention(BaseAttention):
         # Use compiled version if available and enabled
         if self.use_compile and hasattr(self, '_compiled_forward'):
             output, pseudo_queries = self._compiled_forward(Q, K, V)
-            # Clone output to prevent CUDA graph aliasing issues
-            # CUDA graphs cache tensors and don't allow modification after return
-            output = output.clone()
         else:
             output, pseudo_queries = self._forward_impl(Q, K, V)
 
@@ -572,7 +568,9 @@ class PiecewiseAttention(BaseAttention):
                 # Only compile on CUDA for best results
                 # CPU compilation has more dependencies and limited benefit
                 if torch.cuda.is_available():
-                    self._compiled_forward = torch.compile(self._forward_impl, mode="reduce-overhead")
+                    # Use "default" mode instead of "reduce-overhead" to avoid CUDA graphs
+                    # CUDA graphs are too restrictive for multi-head attention with varying inputs
+                    self._compiled_forward = torch.compile(self._forward_impl, mode="default")
                     return True
                 else:
                     # Disable compilation on CPU
