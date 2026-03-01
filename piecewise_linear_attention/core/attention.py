@@ -264,6 +264,9 @@ class LinearAttention(BaseAttention):
         # Use compiled version if available and enabled
         if self.use_compile and hasattr(self, '_compiled_forward'):
             output, normalization = self._compiled_forward(Q, K, V)
+            # Clone output to prevent CUDA graph aliasing issues
+            # CUDA graphs cache tensors and don't allow modification after return
+            output = output.clone()
         else:
             output, normalization = self._forward_impl(Q, K, V)
 
@@ -551,6 +554,9 @@ class PiecewiseAttention(BaseAttention):
         # Use compiled version if available and enabled
         if self.use_compile and hasattr(self, '_compiled_forward'):
             output, pseudo_queries = self._compiled_forward(Q, K, V)
+            # Clone output to prevent CUDA graph aliasing issues
+            # CUDA graphs cache tensors and don't allow modification after return
+            output = output.clone()
         else:
             output, pseudo_queries = self._forward_impl(Q, K, V)
 
