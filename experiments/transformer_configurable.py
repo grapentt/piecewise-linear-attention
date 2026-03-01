@@ -52,6 +52,7 @@ class TransformerBlock(nn.Module):
         is_decoder: bool = False,
         dropout: float = 0.1,
         attention_type: str = "standard",
+        use_compile: bool = True,
         device: Optional[torch.device] = None,
     ):
         super().__init__()
@@ -67,6 +68,7 @@ class TransformerBlock(nn.Module):
             attention_type=attention_type,
             dropout=dropout,
             causal=is_decoder,
+            use_compile=use_compile,
             device=device,
         )
         self.self_attn_layer_norm = nn.LayerNorm(hidden_dim)
@@ -80,6 +82,7 @@ class TransformerBlock(nn.Module):
                 attention_type=attention_type,
                 dropout=dropout,
                 causal=False,  # Cross-attention is never causal
+                use_compile=use_compile,
                 device=device,
             )
             self.cross_attn_layer_norm = nn.LayerNorm(hidden_dim)
@@ -141,6 +144,7 @@ class ConfigurableTransformer(nn.Module):
         padding_index: int = 0,
         max_seq_len: int = 256,
         attention_type: str = "standard",
+        use_compile: bool = True,
         device: Optional[str] = "cpu",
     ):
         """Initialize transformer with chosen attention type.
@@ -156,6 +160,7 @@ class ConfigurableTransformer(nn.Module):
             padding_index: Padding token index
             max_seq_len: Maximum sequence length
             attention_type: "standard", "linear", or "piecewise"
+            use_compile: If True, use torch.compile for GPU optimization (PyTorch 2.0+)
             device: Device to place model on
         """
         super().__init__()
@@ -167,6 +172,7 @@ class ConfigurableTransformer(nn.Module):
         self.padding_index = padding_index
         self.num_heads = num_heads
         self.attention_type = attention_type
+        self.use_compile = use_compile
         self.device = device
 
         # Embeddings
@@ -189,6 +195,7 @@ class ConfigurableTransformer(nn.Module):
                 mlp_hidden_dim=mlp_hidden_dim,
                 is_decoder=False,
                 attention_type=attention_type,
+                use_compile=use_compile,
                 device=device,
             )
             for _ in range(num_encoder_layers)
@@ -202,6 +209,7 @@ class ConfigurableTransformer(nn.Module):
                 mlp_hidden_dim=mlp_hidden_dim,
                 is_decoder=True,
                 attention_type=attention_type,
+                use_compile=use_compile,
                 device=device,
             )
             for _ in range(num_decoder_layers)
@@ -212,6 +220,31 @@ class ConfigurableTransformer(nn.Module):
 
         if device is not None:
             self.to(device)
+
+    def compile(self):
+        """Compile all attention modules for better GPU performance (PyTorch 2.0+).
+
+        Returns:
+            total_compiled: Total number of attention heads successfully compiled
+        """
+        if not self.use_compile:
+            return 0
+
+        total_compiled = 0
+
+        # Compile encoder layers
+        for layer in self.encoder_layers:
+            if hasattr(layer.self_attn, 'compile'):
+                total_compiled += layer.self_attn.compile()
+
+        # Compile decoder layers
+        for layer in self.decoder_layers:
+            if hasattr(layer.self_attn, 'compile'):
+                total_compiled += layer.self_attn.compile()
+            if hasattr(layer, 'cross_attn') and hasattr(layer.cross_attn, 'compile'):
+                total_compiled += layer.cross_attn.compile()
+
+        return total_compiled
 
     def encode(self, source_indices: torch.Tensor) -> torch.Tensor:
         """Encode source sequence."""

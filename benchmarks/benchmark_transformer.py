@@ -119,6 +119,15 @@ def run_transformer_benchmark(
     num_params = sum(p.numel() for p in model.parameters())
     print(f"  Parameters: {num_params:,}")
 
+    # Compile attention modules for GPU optimization (if using linear/piecewise)
+    if attention_type in ["linear", "piecewise"] and device == "cuda":
+        print("\nCompiling attention modules for GPU optimization...")
+        num_compiled = model.compile()
+        if num_compiled > 0:
+            print(f"  ✅ Compiled {num_compiled} attention heads successfully")
+        else:
+            print("  ⚠️  Compilation not available (PyTorch < 2.0 or failed)")
+
     # Optimizer
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 

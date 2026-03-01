@@ -133,6 +133,7 @@ class LinearAttention(BaseAttention):
         kernel_type: str = "elu",
         eps: float = 1e-6,
         causal: bool = False,
+        use_compile: bool = True,
     ):
         """Initialize linear attention.
 
@@ -142,11 +143,13 @@ class LinearAttention(BaseAttention):
             kernel_type: Kernel function ('elu', 'relu', 'softplus')
             eps: Small constant for numerical stability
             causal: If True, use causal masking (query i can only attend to keys 0...i)
+            use_compile: If True, use torch.compile for kernel fusion (PyTorch 2.0+)
         """
         super().__init__(dim, dropout)
         self.kernel = kernel_type
         self.eps = eps
         self.causal = causal
+        self.use_compile = use_compile
 
     def feature_map(self, x: torch.Tensor) -> torch.Tensor:
         """Apply kernel feature map φ(x) to approximate softmax.
@@ -161,21 +164,25 @@ class LinearAttention(BaseAttention):
             # elu(x) + 1 - standard choice from "Transformers are RNNs"
             return F.elu(x) + 1.0
         elif self.kernel == "relu":
-            # ReLU(x) + eps
+            # ReLU(x) + eps for positivity
             return F.relu(x) + self.eps
+        elif self.kernel == "relu_squared":
+            # ReLU²(x) - faster than ELU, better approximation than linear ReLU
+            # Squaring is much faster than exp() in ELU
+            return torch.square(F.relu(x)) + self.eps
         elif self.kernel == "softplus":
             # softplus(x) = log(1 + exp(x))
             return F.softplus(x)
         else:
-            raise ValueError(f"Unknown kernel: {self.kernel}. Use 'elu', 'relu', or 'softplus'.")
+            raise ValueError(f"Unknown kernel: {self.kernel}. Use 'elu', 'relu', 'relu_squared', or 'softplus'.")
 
-    def forward(
+    def _forward_impl(
         self,
         Q: torch.Tensor,
         K: torch.Tensor,
         V: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Compute linear attention with kernel feature maps.
+        """Core forward implementation (may be compiled).
 
         Args:
             Q: Query tensor of shape (batch, seq_len, dim)
@@ -194,20 +201,27 @@ class LinearAttention(BaseAttention):
             # Causal masking using cumulative sum
             # For each query position i, we can only attend to keys 0...i
 
-            # Compute cumulative key-value products: cumsum(K' ⊙ V)
+            # OPTIMIZED: Use bmm instead of einsum for outer products
+            # Compute cumulative key-value products: cumsum(K' ⊗ V)
             # Shape: (batch, seq_len, dim, dim)
-            k_prime_v = torch.einsum('bnd,bnm->bndm', K_prime, V)
+            # k_prime_v[b, n, i, j] = K_prime[b, n, i] * V[b, n, j]
+            k_prime_v = torch.matmul(K_prime.unsqueeze(-1), V.unsqueeze(-2))
             # Cumulative sum along sequence dimension
             k_prime_v_cumsum = torch.cumsum(k_prime_v, dim=1)
 
-            # Compute numerator: Q'[i] @ cumsum(K'[j] ⊙ V[j] for j <= i)
+            # Compute numerator: Q'[i] @ cumsum(K'[j] ⊗ V[j] for j <= i)
             # Shape: (batch, seq_len, dim)
-            numerator = torch.einsum('bnd,bndm->bnm', Q_prime, k_prime_v_cumsum)
+            # OPTIMIZED: Use matmul instead of einsum
+            numerator = torch.matmul(
+                Q_prime.unsqueeze(-2),  # (batch, seq_len, 1, dim)
+                k_prime_v_cumsum        # (batch, seq_len, dim, dim)
+            ).squeeze(-2)               # (batch, seq_len, dim)
 
             # Compute normalization: Q'[i] @ cumsum(K'[j] for j <= i)
             # Shape: (batch, seq_len, 1)
             k_prime_cumsum = torch.cumsum(K_prime, dim=1)
-            normalization = torch.einsum('bnd,bnd->bn', Q_prime, k_prime_cumsum).unsqueeze(-1)
+            # OPTIMIZED: Direct element-wise multiplication and sum
+            normalization = (Q_prime * k_prime_cumsum).sum(dim=-1, keepdim=True)
         else:
             # Non-causal linear attention (original implementation)
             # Build memory matrix: M = K'^T @ V
@@ -227,9 +241,53 @@ class LinearAttention(BaseAttention):
 
         # Normalize output
         output = numerator / (normalization + self.eps)
-        output = self.dropout(output)
 
         return output, normalization
+
+    def forward(
+        self,
+        Q: torch.Tensor,
+        K: torch.Tensor,
+        V: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Compute linear attention with kernel feature maps.
+
+        Args:
+            Q: Query tensor of shape (batch, seq_len, dim)
+            K: Key tensor of shape (batch, seq_len, dim)
+            V: Value tensor of shape (batch, seq_len, dim)
+
+        Returns:
+            output: Attention output of shape (batch, seq_len, dim)
+            normalization: Normalization terms of shape (batch, seq_len, 1)
+        """
+        # Use compiled version if available and enabled
+        if self.use_compile and hasattr(self, '_compiled_forward'):
+            output, normalization = self._compiled_forward(Q, K, V)
+        else:
+            output, normalization = self._forward_impl(Q, K, V)
+
+        output = self.dropout(output)
+        return output, normalization
+
+    def compile(self):
+        """Compile the forward pass for better GPU performance (PyTorch 2.0+)."""
+        if self.use_compile:
+            try:
+                # Only compile on CUDA for best results
+                # CPU compilation has more dependencies and limited benefit
+                if torch.cuda.is_available():
+                    self._compiled_forward = torch.compile(self._forward_impl, mode="reduce-overhead")
+                    return True
+                else:
+                    # Disable compilation on CPU
+                    self.use_compile = False
+                    return False
+            except Exception:
+                # torch.compile not available or failed
+                self.use_compile = False
+                return False
+        return False
 
 
 class PiecewiseAttention(BaseAttention):
@@ -259,6 +317,7 @@ class PiecewiseAttention(BaseAttention):
         pseudo_query_fn: Optional[Callable[[torch.Tensor], torch.Tensor]] = None,
         causal: bool = False,
         causal_pseudo_query: str = "mean",
+        use_compile: bool = True,
     ):
         """Initialize piecewise attention.
 
@@ -273,11 +332,13 @@ class PiecewiseAttention(BaseAttention):
             causal_pseudo_query: Strategy for selecting pseudo-query in causal mode.
                                "mean": mean of all queries (best for training with full sequence)
                                "first": first query (best for autoregressive inference)
+            use_compile: If True, use torch.compile for kernel fusion (PyTorch 2.0+)
         """
         super().__init__(dim, dropout)
         self.scale = scale
         self.causal = causal
         self.causal_pseudo_query = causal_pseudo_query
+        self.use_compile = use_compile
         if causal_pseudo_query not in ("mean", "first"):
             raise ValueError(f"causal_pseudo_query must be 'mean' or 'first', got {causal_pseudo_query}")
         self.pseudo_query_fn = pseudo_query_fn or self._default_pseudo_query
@@ -319,41 +380,48 @@ class PiecewiseAttention(BaseAttention):
         _, _, dim = K.shape
         scale_factor = 1.0 / math.sqrt(dim) if self.scale else 1.0
 
+        # OPTIMIZED: Use matmul instead of einsum for scores
         # Compute attention scores: (batch, seq_len)
-        scores = torch.einsum('bd,bnd->bn', pseudo_query, K)
+        scores = torch.matmul(pseudo_query.unsqueeze(1), K.transpose(-2, -1)).squeeze(1)
         scores = scores * scale_factor
 
         # Compute attention weights: (batch, seq_len)
         attn_weights = torch.softmax(scores, dim=-1)
 
+        # OPTIMIZED: Use matmul instead of einsum for output
         # Compute attention output: (batch, dim)
-        output = torch.einsum('bn,bnd->bd', attn_weights, V)
+        output = torch.matmul(attn_weights.unsqueeze(1), V).squeeze(1)
 
         # Compute Jacobian analytically
         # J = scale * [Σ α_i (v_i ⊗ k_i) - v̄ ⊗ k̄]
         # where v̄ = Σ α_i v_i (= output) and k̄ = Σ α_i k_i
 
+        # OPTIMIZED: Use matmul instead of einsum for weighted_k
         # Weighted sum of keys: (batch, dim)
-        weighted_k = torch.einsum('bn,bnd->bd', attn_weights, K)
+        weighted_k = torch.matmul(attn_weights.unsqueeze(1), K).squeeze(1)
 
+        # OPTIMIZED: Compute weighted outer products using bmm
         # Weighted sum of outer products: (batch, dim, dim)
-        weighted_outer = torch.einsum('bn,bni,bnj->bij', attn_weights, V, K)
+        # weighted_outer[b, i, j] = Σ_n α[b,n] * V[b,n,i] * K[b,n,j]
+        V_weighted = V * attn_weights.unsqueeze(-1)  # (batch, seq_len, dim)
+        weighted_outer = torch.matmul(V_weighted.transpose(-2, -1), K)  # (batch, dim, dim)
 
+        # OPTIMIZED: Outer product using unsqueeze and matmul
         # Outer product of weighted sums: (batch, dim, dim)
-        outer_weighted = torch.einsum('bi,bj->bij', output, weighted_k)
+        outer_weighted = torch.matmul(output.unsqueeze(-1), weighted_k.unsqueeze(-2))
 
         # Combine to get Jacobian
         jacobian = scale_factor * (weighted_outer - outer_weighted)
 
         return output, jacobian
 
-    def forward(
+    def _forward_impl(
         self,
         Q: torch.Tensor,
         K: torch.Tensor,
         V: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Compute piecewise linear attention.
+        """Core forward implementation (may be compiled).
 
         Args:
             Q: Query tensor of shape (batch, seq_len, dim)
@@ -381,23 +449,28 @@ class PiecewiseAttention(BaseAttention):
                 q_bar = Q[:, 0, :]  # (batch, dim)
 
             # Step 2: Compute anchor attention scores s_j = exp(q̄·k_j / √d)
+            # OPTIMIZED: Use matmul instead of einsum
             # Shape: (batch, seq_len)
-            anchor_scores = torch.einsum('bd,bnd->bn', q_bar, K) * scale_factor
+            anchor_scores = torch.matmul(q_bar.unsqueeze(1), K.transpose(-2, -1)).squeeze(1) * scale_factor
             s = torch.exp(anchor_scores)  # (batch, seq_len)
 
             # Step 3: Precompute cumsum terms (all independent of q_i!)
             # A_j = s_j * v_j  (weighted values)
-            A = s.unsqueeze(-1) * V  # (batch, seq_len, dim)
+            # OPTIMIZED: Fused multiplication
+            s_expanded = s.unsqueeze(-1)  # (batch, seq_len, 1)
+            A = s_expanded * V  # (batch, seq_len, dim)
 
             # B_j = s_j * (k_j ⊗ v_j)  (weighted outer products for numerator)
+            # OPTIMIZED: Use matmul instead of einsum for outer products
             # Shape: (batch, seq_len, dim, dim)
-            B = torch.einsum('bn,bni,bnj->bnij', s, K, V)
+            B = torch.matmul(K.unsqueeze(-1), V.unsqueeze(-2))  # Outer product
+            B = B * s.unsqueeze(-1).unsqueeze(-1)  # Scale by s
 
             # C_j = s_j  (weighted counts for denominator)
             C = s  # (batch, seq_len)
 
             # D_j = s_j * k_j  (weighted keys for denominator)
-            D = s.unsqueeze(-1) * K  # (batch, seq_len, dim)
+            D = s_expanded * K  # (batch, seq_len, dim)
 
             # Step 4: Apply cumulative sum along sequence dimension
             # These give us Σ_{j=1}^i for each position i
@@ -411,13 +484,19 @@ class PiecewiseAttention(BaseAttention):
 
             # Step 6: Compute numerator for each position i
             # Numerator_i = S^A_i + scale_factor * S^B_i @ (q_i - q̄)
+            # OPTIMIZED: Use matmul instead of einsum
             # Shape: (batch, seq_len, dim)
-            numerator = S_A + scale_factor * torch.einsum('bnij,bnj->bni', S_B, delta_q)
+            jacobian_term = torch.matmul(
+                delta_q.unsqueeze(-2),  # (batch, seq_len, 1, dim)
+                S_B                     # (batch, seq_len, dim, dim)
+            ).squeeze(-2)               # (batch, seq_len, dim)
+            numerator = S_A + scale_factor * jacobian_term
 
             # Step 7: Compute denominator for each position i
             # Denominator_i = S^C_i + scale_factor * (q_i - q̄) @ S^D_i
+            # OPTIMIZED: Use element-wise multiplication and sum
             # Shape: (batch, seq_len)
-            denominator = S_C + scale_factor * torch.einsum('bni,bni->bn', delta_q, S_D)
+            denominator = S_C + scale_factor * (delta_q * S_D).sum(dim=-1)
 
             # Step 8: Normalize
             output = numerator / (denominator.unsqueeze(-1) + 1e-6)
@@ -441,19 +520,63 @@ class PiecewiseAttention(BaseAttention):
             # Shape: (batch, seq_len, dim)
             deltas = Q - pseudo_queries.unsqueeze(1)
 
+            # OPTIMIZED: Use matmul instead of einsum
             # Apply Jacobian to deltas: J @ Δq
-            # Use einsum for efficient batched matrix-vector multiplication
             # Shape: (batch, seq_len, dim)
-            jacobian_deltas = torch.einsum('bij,bsj->bsi', jacobians, deltas)
+            jacobian_deltas = torch.matmul(deltas, jacobians.transpose(-2, -1))
 
             # Final output: A(q̃) + J @ Δq
             # Shape: (batch, seq_len, dim)
             output = pseudo_outputs.unsqueeze(1) + jacobian_deltas
 
+        return output, pseudo_queries
+
+    def forward(
+        self,
+        Q: torch.Tensor,
+        K: torch.Tensor,
+        V: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Compute piecewise linear attention.
+
+        Args:
+            Q: Query tensor of shape (batch, seq_len, dim)
+            K: Key tensor of shape (batch, seq_len, dim)
+            V: Value tensor of shape (batch, seq_len, dim)
+
+        Returns:
+            output: Attention output of shape (batch, seq_len, dim)
+            pseudo_queries: Representative queries used, shape (batch, dim)
+        """
+        # Use compiled version if available and enabled
+        if self.use_compile and hasattr(self, '_compiled_forward'):
+            output, pseudo_queries = self._compiled_forward(Q, K, V)
+        else:
+            output, pseudo_queries = self._forward_impl(Q, K, V)
+
         # Apply dropout
         output = self.dropout(output)
 
         return output, pseudo_queries
+
+    def compile(self):
+        """Compile the forward pass for better GPU performance (PyTorch 2.0+)."""
+        if self.use_compile:
+            try:
+                # Only compile on CUDA for best results
+                # CPU compilation has more dependencies and limited benefit
+                if torch.cuda.is_available():
+                    self._compiled_forward = torch.compile(self._forward_impl, mode="reduce-overhead")
+                    return True
+                else:
+                    # Disable compilation on CPU
+                    self.use_compile = False
+                    return False
+            except Exception:
+                # torch.compile not available or failed
+                self.use_compile = False
+                return False
+        return False
 
 
 # Convenient alias

@@ -41,6 +41,7 @@ class MultiHeadAttention(nn.Module):
         pseudo_query_fn: Optional[Callable] = None,
         kernel_type: str = "elu",
         causal: bool = False,
+        use_compile: bool = True,
         device: Optional[torch.device] = None,
     ):
         """Initialize multi-head attention.
@@ -51,8 +52,9 @@ class MultiHeadAttention(nn.Module):
             attention_type: "standard", "linear", or "piecewise"
             dropout: Dropout probability
             pseudo_query_fn: For piecewise attention, how to select representative query
-            kernel_type: For linear attention, kernel type ("elu" or "relu")
+            kernel_type: For linear attention, kernel type ("elu", "relu", or "relu_squared")
             causal: If True, apply causal masking (query i can only attend to keys 0...i)
+            use_compile: If True, use torch.compile for kernel fusion (PyTorch 2.0+)
             device: Device to place module on
         """
         super().__init__()
@@ -64,6 +66,7 @@ class MultiHeadAttention(nn.Module):
         self.hidden_dim = hidden_dim
         self.attention_type = attention_type
         self.causal = causal
+        self.use_compile = use_compile
 
         # Q, K, V projections (shared across heads)
         self.q_projection = nn.Linear(hidden_dim, hidden_dim, bias=False)
@@ -88,7 +91,8 @@ class MultiHeadAttention(nn.Module):
                     dim=self.attn_dim,
                     dropout=dropout,
                     kernel_type=kernel_type,
-                    causal=causal
+                    causal=causal,
+                    use_compile=use_compile
                 )
             elif attention_type == "piecewise":
                 attn = PiecewiseAttention(
@@ -96,7 +100,8 @@ class MultiHeadAttention(nn.Module):
                     dropout=dropout,
                     pseudo_query_fn=pseudo_query_fn,
                     scale=True,
-                    causal=causal
+                    causal=causal,
+                    use_compile=use_compile
                 )
             else:
                 raise ValueError(f"Unknown attention_type: {attention_type}. Must be 'standard', 'linear', or 'piecewise'")
@@ -108,6 +113,22 @@ class MultiHeadAttention(nn.Module):
 
         if device is not None:
             self.to(device)
+
+    def compile(self):
+        """Compile all attention heads for better GPU performance (PyTorch 2.0+).
+
+        Returns:
+            success_count: Number of heads successfully compiled
+        """
+        if not self.use_compile:
+            return 0
+
+        success_count = 0
+        for head in self.attention_heads:
+            if hasattr(head, 'compile') and head.compile():
+                success_count += 1
+
+        return success_count
 
     def forward(
         self,
