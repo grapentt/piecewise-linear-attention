@@ -62,6 +62,8 @@ piecewise-linear-attention/
 
 ## Quick Start
 
+### Non-Causal Attention
+
 ```python
 import torch
 from piecewise_linear_attention import PiecewiseAttention
@@ -80,9 +82,29 @@ output, pseudo_queries = attention(Q, K, V)
 print(output.shape)  # (2, 1024, 512)
 ```
 
+### Causal Attention (Language Modeling)
+
+```python
+# For training: use mean of all queries as anchor
+attention_train = PiecewiseAttention(
+    dim=512,
+    causal=True,
+    causal_pseudo_query="mean"  # best for training
+)
+
+# For autoregressive inference: use first query as anchor
+attention_infer = PiecewiseAttention(
+    dim=512,
+    causal=True,
+    causal_pseudo_query="first"  # zero information leakage
+)
+
+output, _ = attention_train(Q, K, V)
+```
+
 ### Custom Pseudo-Query Selection
 
-You can customize how the representative query is selected:
+You can customize how the representative query is selected (non-causal only):
 
 ```python
 def first_query_selector(Q):
@@ -99,6 +121,8 @@ output, _ = attention(Q, K, V)
   - 8-9× faster than standard attention
   - 30% better accuracy than linear attention
   - No initialization or clustering required
+  - **Causal masking support** with O(n·d²) complexity
+  - Configurable anchor selection for training vs inference
   - Extensible via custom `pseudo_query_fn`
 - ✅ **StandardAttention**: Full softmax attention baseline
 - ✅ **LinearAttention**: Proper linear attention with kernel feature maps (ELU, ReLU, softplus)
@@ -180,7 +204,7 @@ MIT License - see LICENSE file for details
 
 ## Algorithm Details
 
-**PiecewiseAttention** works as follows:
+### Non-Causal PiecewiseAttention
 
 ```
 For each batch sample:
@@ -195,6 +219,28 @@ For each batch sample:
 ```
 
 **Complexity**: O(batch · n · d²) vs O(batch · n² · d) for standard attention
+
+### Causal PiecewiseAttention (Optimized with Cumsum)
+
+```
+For each batch sample:
+  1. Select anchor query: q̄ = mean(Q) or Q[0]
+  2. Compute anchor weights: s_j = exp(q̄ @ k_j / sqrt(d))
+  3. Precompute cumsum terms:
+     - A_j = s_j * v_j
+     - B_j = s_j * (k_j ⊗ v_j)
+     - C_j = s_j
+     - D_j = s_j * k_j
+  4. Apply cumsum: S^A, S^B, S^C, S^D = cumsum(A, B, C, D)
+  5. For each position i:
+     - numerator_i = S^A[i] + S^B[i] @ (q_i - q̄)
+     - denominator_i = S^C[i] + S^D[i] @ (q_i - q̄)
+     - output[i] = numerator_i / denominator_i
+```
+
+**Complexity**: O(batch · n · d²) - same as LinearAttention but better accuracy!
+
+**Key insight**: By linearizing the exponential kernel *before* summation, we can use cumsum for efficient causal masking while computing the same Jacobian-based approximation.
 
 ---
 
