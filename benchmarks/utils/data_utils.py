@@ -136,6 +136,13 @@ def prepare_dataset(
     eval_split = "validation" if "validation" in dataset else "test"
     eval_pairs = extract_pairs(eval_split, max_eval_samples)
 
+    # If no eval split exists, use last part of training data
+    if len(eval_pairs) == 0 and len(train_pairs) > 0:
+        split_idx = int(len(train_pairs) * 0.9)  # 90% train, 10% eval
+        eval_pairs = train_pairs[split_idx:split_idx + max_eval_samples] if max_eval_samples else train_pairs[split_idx:]
+        train_pairs = train_pairs[:split_idx]
+        print("✓ No eval split found, using last 10% of training data")
+
     print(f"✓ Loaded {len(train_pairs)} train pairs, {len(eval_pairs)} eval pairs")
 
     # Build vocabularies
