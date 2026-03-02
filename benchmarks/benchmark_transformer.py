@@ -43,6 +43,8 @@ def run_transformer_benchmark(
     epochs: int,
     batch_size: int,
     learning_rate: float,
+    weight_decay: float,
+    dropout: float,
     device: str,
 ) -> Dict:
     """Run benchmark for one attention type.
@@ -111,7 +113,9 @@ def run_transformer_benchmark(
         num_encoder_layers=num_layers,
         num_decoder_layers=num_layers,
         num_heads=num_heads,
+        max_seq_len=max_seq_len,  # Pass max_seq_len for positional encoding
         attention_type=attention_type,
+        dropout=dropout,  # Use dropout parameter
         device=device,
     )
 
@@ -119,8 +123,17 @@ def run_transformer_benchmark(
     num_params = sum(p.numel() for p in model.parameters())
     print(f"  Parameters: {num_params:,}")
 
-    # Optimizer
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    # Compile attention modules for GPU optimization (if using linear/piecewise)
+    if attention_type in ["linear", "piecewise"] and device == "cuda":
+        print("\nCompiling attention modules for GPU optimization...")
+        num_compiled = model.compile()
+        if num_compiled > 0:
+            print(f"  ✅ Compiled {num_compiled} attention heads successfully")
+        else:
+            print("  ⚠️  Compilation not available (PyTorch < 2.0 or failed)")
+
+    # Optimizer with weight decay for regularization
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
 
     # Initial evaluation
     print("\nInitial evaluation...")
@@ -219,16 +232,16 @@ def main():
         "--dataset",
         type=str,
         default="bentrevett/multi30k",
-        help="HuggingFace dataset name (default: bentrevett/multi30k)",
+        help="HuggingFace dataset name. Examples: bentrevett/multi30k, opus_books, wmt14, wmt16 (default: bentrevett/multi30k)",
     )
     parser.add_argument(
         "--subset",
         type=str,
         default="de-en",
-        help="Dataset subset (default: de-en)",
+        help="Dataset subset. For opus_books use 'de-en', for wmt14/wmt16 use 'de-en', etc. (default: de-en)",
     )
-    parser.add_argument("--src", type=str, default="de", help="Source language (default: de)")
-    parser.add_argument("--tgt", type=str, default="en", help="Target language (default: en)")
+    parser.add_argument("--src", type=str, default="de", help="Source language code (default: de)")
+    parser.add_argument("--tgt", type=str, default="en", help="Target language code (default: en)")
     parser.add_argument(
         "--max-train-samples",
         type=int,
@@ -287,6 +300,18 @@ def main():
         default=0.0001,
         help="Learning rate (default: 0.0001)",
     )
+    parser.add_argument(
+        "--weight-decay",
+        type=float,
+        default=0.0,
+        help="Weight decay for regularization (default: 0.0, try 0.01 for overfitting)",
+    )
+    parser.add_argument(
+        "--dropout",
+        type=float,
+        default=0.1,
+        help="Dropout probability (default: 0.1)",
+    )
 
     # Comparison arguments
     parser.add_argument(
@@ -344,6 +369,8 @@ def main():
                 epochs=args.epochs,
                 batch_size=args.batch_size,
                 learning_rate=args.lr,
+                weight_decay=args.weight_decay,
+                dropout=args.dropout,
                 device=args.device,
             )
             results.append(result)
