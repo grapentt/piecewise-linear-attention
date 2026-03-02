@@ -144,6 +144,7 @@ class ConfigurableTransformer(nn.Module):
         padding_index: int = 0,
         max_seq_len: int = 256,
         attention_type: str = "standard",
+        dropout: float = 0.1,
         use_compile: bool = True,
         device: Optional[str] = "cpu",
     ):
@@ -160,6 +161,7 @@ class ConfigurableTransformer(nn.Module):
             padding_index: Padding token index
             max_seq_len: Maximum sequence length
             attention_type: "standard", "linear", or "piecewise"
+            dropout: Dropout probability for regularization (default: 0.1)
             use_compile: If True, use torch.compile for GPU optimization (PyTorch 2.0+)
             device: Device to place model on
         """
@@ -194,6 +196,7 @@ class ConfigurableTransformer(nn.Module):
                 num_heads=num_heads,
                 mlp_hidden_dim=mlp_hidden_dim,
                 is_decoder=False,
+                dropout=dropout,
                 attention_type=attention_type,
                 use_compile=use_compile,
                 device=device,
@@ -208,6 +211,7 @@ class ConfigurableTransformer(nn.Module):
                 num_heads=num_heads,
                 mlp_hidden_dim=mlp_hidden_dim,
                 is_decoder=True,
+                dropout=dropout,
                 attention_type=attention_type,
                 use_compile=use_compile,
                 device=device,
