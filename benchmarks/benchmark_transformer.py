@@ -232,16 +232,16 @@ def main():
         "--dataset",
         type=str,
         default="bentrevett/multi30k",
-        help="HuggingFace dataset name (default: bentrevett/multi30k)",
+        help="HuggingFace dataset name. Examples: bentrevett/multi30k, opus_books, wmt14, wmt16 (default: bentrevett/multi30k)",
     )
     parser.add_argument(
         "--subset",
         type=str,
         default="de-en",
-        help="Dataset subset (default: de-en)",
+        help="Dataset subset. For opus_books use 'de-en', for wmt14/wmt16 use 'de-en', etc. (default: de-en)",
     )
-    parser.add_argument("--src", type=str, default="de", help="Source language (default: de)")
-    parser.add_argument("--tgt", type=str, default="en", help="Target language (default: en)")
+    parser.add_argument("--src", type=str, default="de", help="Source language code (default: de)")
+    parser.add_argument("--tgt", type=str, default="en", help="Target language code (default: en)")
     parser.add_argument(
         "--max-train-samples",
         type=int,
