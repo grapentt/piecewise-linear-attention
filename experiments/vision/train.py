@@ -11,11 +11,13 @@ Usage:
 
 import argparse
 import json
+import random
 import sys
 import time
 from pathlib import Path
 from typing import Dict
 
+import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -26,6 +28,26 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from piecewise_linear_attention.models.vit import vit_tiny, vit_small, vit_base
+
+
+def set_seed(seed: int = 42):
+    """Set random seeds for reproducibility.
+
+    This ensures all attention variants get identical:
+    - Model initializations
+    - Data shuffling order
+    - Data augmentation samples
+
+    Args:
+        seed: Random seed value
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    # Make PyTorch deterministic (may impact performance slightly)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 
 def get_cifar10_loaders(batch_size: int = 128, num_workers: int = 4):
@@ -300,6 +322,12 @@ def main():
         type=str,
         help="Save results to JSON file",
     )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for reproducibility (default: 42)",
+    )
 
     args = parser.parse_args()
 
@@ -311,11 +339,16 @@ def main():
     print(f"Epochs: {args.epochs}, Batch size: {args.batch_size}, LR: {args.lr}")
     print(f"Comparing: {', '.join(args.attention_types)}")
     print(f"Device: {args.device}")
+    print(f"Random Seed: {args.seed}")
     print()
 
     # Run experiments
     results = []
     for attention_type in args.attention_types:
+        # Set the same seed before each experiment for fair comparison
+        print(f"\n🎲 Setting random seed to {args.seed} for {attention_type} attention...")
+        set_seed(args.seed)
+
         try:
             result = run_vit_experiment(
                 attention_type=attention_type,
