@@ -36,6 +36,15 @@ benchmark = [
     "seaborn>=0.12.0",
     "psutil>=5.9.0",  # For memory profiling
 ]
+experiments = [
+    "tqdm>=4.65.0",
+    "datasets>=2.14.0",  # HuggingFace datasets
+    "sacrebleu>=2.3.0",  # BLEU score evaluation
+    "torchvision>=0.15.0",
+    "pillow>=9.0.0",
+    "transformers>=4.30.0",  # For tokenizers
+    "datasets>=2.14.0",  # HuggingFace datasets (duplicate but clear)
+]
 docs = [
     "sphinx>=5.0.0",
     "sphinx-rtd-theme>=1.2.0",

@@ -1,6 +1,6 @@
 # Piecewise Linear Attention
 
-> Efficient attention mechanism using piecewise linear approximation
+> Novel efficient attention mechanism using piecewise linear approximation
 
 ## Overview
 
@@ -24,6 +24,25 @@ Instead of computing full softmax attention for all $n$ queries (expensive) or u
 
 This leverages the fact that locally, the attention function can be well-approximated by its first-order Taylor expansion, eliminating the need for clustering and nearest-neighbor search.
 
+## 🚀 Try it on Google Colab!
+
+**Run experiments with free GPU** - no installation needed. Choose your experiment:
+
+| Experiment | Dataset | Notebook |
+|------------|---------|----------|
+| **Translation** | Multi30K (German→English) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/grapentt/piecewise-linear-attention/blob/main/experiments/translation/colab_translation.ipynb) |
+| **Vision** | CIFAR-10 (ViT) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/grapentt/piecewise-linear-attention/blob/main/experiments/vision/colab_vision.ipynb) |
+| **BERT** | SST-2 (Sentiment) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/grapentt/piecewise-linear-attention/blob/main/experiments/bert/colab_bert.ipynb) |
+| **Benchmark** | Performance Analysis | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/grapentt/piecewise-linear-attention/blob/main/benchmarks/colab_benchmark.ipynb) |
+
+Each notebook includes:
+- ✅ Easy repo cloning with custom branch support
+- ✅ Training/benchmarking with all three attention types (standard, linear, piecewise)
+- ✅ Automatic visualization & comparison
+- ✅ Result download
+
+---
+
 ## Installation
 
 ### Using uv (recommended)
@@ -35,8 +54,11 @@ uv pip install -e .
 # Install with development dependencies
 uv pip install -e ".[dev]"
 
+# Install with experiment dependencies
+uv pip install -e ".[experiments]"
+
 # Install all optional dependencies
-uv pip install -e ".[dev,benchmark,docs]"
+uv pip install -e ".[dev,benchmark,experiments,docs]"
 ```
 
 ### Using pip
@@ -44,6 +66,7 @@ uv pip install -e ".[dev,benchmark,docs]"
 ```bash
 pip install -e .
 pip install -e ".[dev]"  # with development dependencies
+pip install -e ".[experiments]"  # for running experiments
 ```
 
 ## Project Structure
