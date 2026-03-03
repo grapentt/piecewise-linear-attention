@@ -11,12 +11,14 @@ Usage:
 
 import argparse
 import json
+import random
 import sys
 import time
 from functools import partial
 from pathlib import Path
 from typing import Dict, List
 
+import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -28,6 +30,26 @@ sys.path.insert(0, str(project_root))
 from experiments.utils.data import prepare_dataset, collate_fn
 from experiments.utils.training import train_epoch, evaluate
 from piecewise_linear_attention.models.translation_transformer import ConfigurableTransformer
+
+
+def set_seed(seed: int = 42):
+    """Set random seeds for reproducibility.
+
+    This ensures all attention variants get identical:
+    - Model initializations
+    - Data shuffling order
+    - Data augmentation samples
+
+    Args:
+        seed: Random seed value
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    # Make PyTorch deterministic (may impact performance slightly)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 
 def run_transformer_benchmark(
@@ -312,6 +334,12 @@ def main():
         default="cpu",
         help="Device to use (default: cpu)",
     )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for reproducibility (default: 42)",
+    )
 
     args = parser.parse_args()
 
@@ -324,12 +352,17 @@ def main():
     print(f"Training: {args.epochs} epochs, batch={args.batch_size}, lr={args.lr}")
     print(f"Comparing: {', '.join(args.attention_types)}")
     print(f"Device: {args.device}")
+    print(f"Random Seed: {args.seed}")
     print()
 
     # Run benchmarks for each attention type
     results = []
 
     for attention_type in args.attention_types:
+        # Set the same seed before each experiment for fair comparison
+        print(f"\n🎲 Setting random seed to {args.seed} for {attention_type} attention...")
+        set_seed(args.seed)
+
         try:
             result = run_transformer_benchmark(
                 attention_type=attention_type,
