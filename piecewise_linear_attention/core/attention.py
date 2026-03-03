@@ -196,18 +196,18 @@ class LinearAttention(BaseAttention):
 
             # Compute cumulative key-value products: cumsum(K' ⊙ V)
             # Shape: (batch, seq_len, dim, dim)
-            k_prime_v = torch.einsum('bnd,bnm->bndm', K_prime, V)
+            k_prime_v = K_prime.unsqueeze(-1) * V.unsqueeze(-2)
             # Cumulative sum along sequence dimension
             k_prime_v_cumsum = torch.cumsum(k_prime_v, dim=1)
 
             # Compute numerator: Q'[i] @ cumsum(K'[j] ⊙ V[j] for j <= i)
             # Shape: (batch, seq_len, dim)
-            numerator = torch.einsum('bnd,bndm->bnm', Q_prime, k_prime_v_cumsum)
+            numerator = (k_prime_v_cumsum @ Q_prime.unsqueeze(-1)).squeeze(-1)
 
             # Compute normalization: Q'[i] @ cumsum(K'[j] for j <= i)
             # Shape: (batch, seq_len, 1)
             k_prime_cumsum = torch.cumsum(K_prime, dim=1)
-            normalization = torch.einsum('bnd,bnd->bn', Q_prime, k_prime_cumsum).unsqueeze(-1)
+            normalization = (Q_prime * k_prime_cumsum).sum(dim=-1, keepdim=True)
         else:
             # Non-causal linear attention (original implementation)
             # Build memory matrix: M = K'^T @ V
@@ -298,7 +298,7 @@ class PiecewiseAttention(BaseAttention):
 
     def _compute_attention_and_jacobian(
         self,
-        pseudo_query: torch.Tensor,
+        pseudo_queries: torch.Tensor,
         K: torch.Tensor,
         V: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -320,27 +320,31 @@ class PiecewiseAttention(BaseAttention):
         scale_factor = 1.0 / math.sqrt(dim) if self.scale else 1.0
 
         # Compute attention scores: (batch, seq_len)
-        scores = torch.einsum('bd,bnd->bn', pseudo_query, K)
-        scores = scores * scale_factor
+        # scores = pseudo_queries @ K^T for each batch
+        scores = (K @ pseudo_queries.unsqueeze(-1)).squeeze(-1) * scale_factor
 
         # Compute attention weights: (batch, seq_len)
         attn_weights = torch.softmax(scores, dim=-1)
 
         # Compute attention output: (batch, dim)
-        output = torch.einsum('bn,bnd->bd', attn_weights, V)
+        # output = attn_weights @ V
+        output = (attn_weights.unsqueeze(1) @ V).squeeze(1)
 
         # Compute Jacobian analytically
         # J = scale * [Σ α_i (v_i ⊗ k_i) - v̄ ⊗ k̄]
         # where v̄ = Σ α_i v_i (= output) and k̄ = Σ α_i k_i
 
         # Weighted sum of keys: (batch, dim)
-        weighted_k = torch.einsum('bn,bnd->bd', attn_weights, K)
+        weighted_k = (attn_weights.unsqueeze(1) @ K).squeeze(1)
 
         # Weighted sum of outer products: (batch, dim, dim)
-        weighted_outer = torch.einsum('bn,bni,bnj->bij', attn_weights, V, K)
+        # Σ α_i (v_i ⊗ k_i) = V^T @ diag(α) @ K
+        # Equivalent to: (V * α^T)^T @ K where α is broadcast
+        weighted_v = attn_weights.unsqueeze(-1) * V  # (batch, seq_len, dim)
+        weighted_outer = weighted_v.transpose(-2, -1) @ K
 
         # Outer product of weighted sums: (batch, dim, dim)
-        outer_weighted = torch.einsum('bi,bj->bij', output, weighted_k)
+        outer_weighted = output.unsqueeze(-1) @ weighted_k.unsqueeze(1)
 
         # Combine to get Jacobian
         jacobian = scale_factor * (weighted_outer - outer_weighted)
@@ -382,7 +386,7 @@ class PiecewiseAttention(BaseAttention):
 
             # Step 2: Compute anchor attention scores s_j = exp(q̄·k_j / √d)
             # Shape: (batch, seq_len)
-            anchor_scores = torch.einsum('bd,bnd->bn', q_bar, K) * scale_factor
+            anchor_scores = (K @ q_bar.unsqueeze(-1)).squeeze(-1) * scale_factor
             s = torch.exp(anchor_scores)  # (batch, seq_len)
 
             # Step 3: Precompute cumsum terms (all independent of q_i!)
@@ -391,7 +395,8 @@ class PiecewiseAttention(BaseAttention):
 
             # B_j = s_j * (k_j ⊗ v_j)  (weighted outer products for numerator)
             # Shape: (batch, seq_len, dim, dim)
-            B = torch.einsum('bn,bni,bnj->bnij', s, K, V)
+            s_expanded = s.unsqueeze(-1).unsqueeze(-1)  # (batch, seq_len, 1, 1)
+            B = s_expanded * K.unsqueeze(-1) * V.unsqueeze(-2)  # (batch, seq_len, dim, dim)
 
             # C_j = s_j  (weighted counts for denominator)
             C = s  # (batch, seq_len)
@@ -412,12 +417,14 @@ class PiecewiseAttention(BaseAttention):
             # Step 6: Compute numerator for each position i
             # Numerator_i = S^A_i + scale_factor * S^B_i @ (q_i - q̄)
             # Shape: (batch, seq_len, dim)
-            numerator = S_A + scale_factor * torch.einsum('bnij,bnj->bni', S_B, delta_q)
+            # Use batched matrix-vector multiplication: (b,n,d,d) @ (b,n,d,1) -> (b,n,d,1)
+            numerator = S_A + scale_factor * (S_B @ delta_q.unsqueeze(-1)).squeeze(-1)
 
             # Step 7: Compute denominator for each position i
             # Denominator_i = S^C_i + scale_factor * (q_i - q̄) @ S^D_i
             # Shape: (batch, seq_len)
-            denominator = S_C + scale_factor * torch.einsum('bni,bni->bn', delta_q, S_D)
+            # Element-wise dot product: sum over dimension
+            denominator = S_C + scale_factor * (delta_q * S_D).sum(dim=-1)
 
             # Step 8: Normalize
             output = numerator / (denominator.unsqueeze(-1) + 1e-6)
@@ -442,9 +449,9 @@ class PiecewiseAttention(BaseAttention):
             deltas = Q - pseudo_queries.unsqueeze(1)
 
             # Apply Jacobian to deltas: J @ Δq
-            # Use einsum for efficient batched matrix-vector multiplication
+            # Batched matrix-vector multiplication
             # Shape: (batch, seq_len, dim)
-            jacobian_deltas = torch.einsum('bij,bsj->bsi', jacobians, deltas)
+            jacobian_deltas = (jacobians @ deltas.transpose(-2, -1)).transpose(-2, -1)
 
             # Final output: A(q̃) + J @ Δq
             # Shape: (batch, seq_len, dim)
