@@ -154,6 +154,7 @@ def run_bert_experiment(
     batch_size: int = 32,
     learning_rate: float = 2e-5,
     device: str = "cpu",
+    log_every: int = 1,
 ) -> Dict:
     """Run BERT experiment for one attention type.
 
@@ -165,6 +166,7 @@ def run_bert_experiment(
         batch_size: Batch size
         learning_rate: Learning rate
         device: Device to use
+        log_every: Log metrics every N epochs (also logs first and last)
 
     Returns:
         Dictionary with training results
@@ -221,11 +223,12 @@ def run_bert_experiment(
         train_history.append(train_metrics)
         val_history.append(val_metrics)
 
-        print(f"Epoch {epoch + 1}/{epochs}")
-        print(f"  Train - Loss: {train_metrics['loss']:.4f}, Acc: {train_metrics['accuracy']:.2f}%, "
-              f"Time: {train_metrics['time_seconds']:.1f}s, "
-              f"Speed: {train_metrics['samples_per_second']:.1f} samples/s")
-        print(f"  Val   - Loss: {val_metrics['loss']:.4f}, Acc: {val_metrics['accuracy']:.2f}%")
+        if (epoch + 1) % log_every == 0 or epoch == 0 or epoch == epochs - 1:
+            print(f"Epoch {epoch + 1}/{epochs}")
+            print(f"  Train - Loss: {train_metrics['loss']:.4f}, Acc: {train_metrics['accuracy']:.2f}%, "
+                  f"Time: {train_metrics['time_seconds']:.1f}s, "
+                  f"Speed: {train_metrics['samples_per_second']:.1f} samples/s")
+            print(f"  Val   - Loss: {val_metrics['loss']:.4f}, Acc: {val_metrics['accuracy']:.2f}%")
 
     avg_samples_per_second = sum(m["samples_per_second"] for m in train_history) / len(train_history)
 
@@ -316,6 +319,12 @@ def main():
         default=42,
         help="Random seed for reproducibility (default: 42)",
     )
+    parser.add_argument(
+        "--log-every",
+        type=int,
+        default=1,
+        help="Log metrics every N epochs (default: 1)",
+    )
 
     args = parser.parse_args()
 
@@ -346,6 +355,7 @@ def main():
                 batch_size=args.batch_size,
                 learning_rate=args.lr,
                 device=args.device,
+                log_every=args.log_every,
             )
             results.append(result)
         except Exception as e:

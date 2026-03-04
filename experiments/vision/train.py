@@ -152,6 +152,7 @@ def run_vit_experiment(
     batch_size: int = 128,
     learning_rate: float = 0.001,
     device: str = "cpu",
+    log_every: int = 10,
 ) -> Dict:
     """Run ViT experiment for one attention type.
 
@@ -163,6 +164,7 @@ def run_vit_experiment(
         batch_size: Batch size
         learning_rate: Learning rate
         device: Device to use
+        log_every: Log metrics every N epochs (also logs first and last)
 
     Returns:
         Dictionary with training results
@@ -231,7 +233,7 @@ def run_vit_experiment(
         train_history.append(train_metrics)
         test_history.append(test_metrics)
 
-        if (epoch + 1) % 10 == 0 or epoch == 0:
+        if (epoch + 1) % log_every == 0 or epoch == 0 or epoch == epochs - 1:
             print(f"Epoch {epoch + 1}/{epochs}")
             print(f"  Train - Loss: {train_metrics['loss']:.4f}, Acc: {train_metrics['accuracy']:.2f}%, "
                   f"Time: {train_metrics['time_seconds']:.1f}s, "
@@ -328,6 +330,12 @@ def main():
         default=42,
         help="Random seed for reproducibility (default: 42)",
     )
+    parser.add_argument(
+        "--log-every",
+        type=int,
+        default=10,
+        help="Log metrics every N epochs (default: 10)",
+    )
 
     args = parser.parse_args()
 
@@ -358,6 +366,7 @@ def main():
                 batch_size=args.batch_size,
                 learning_rate=args.lr,
                 device=args.device,
+                log_every=args.log_every,
             )
             results.append(result)
         except Exception as e:
