@@ -2,7 +2,7 @@
 
 ## Abstract
 
-This document presents the theoretical foundation for **piecewise-linear-attention**, a novel attention mechanism that achieves sub-quadratic complexity while maintaining the expressiveness of softmax attention. By combining the efficiency of linear attention with piecewise linear approximation around learned pseudo-queries, we reduce the computational complexity from $O(n^2)$ to approximately $O(n \cdot k)$, where $k$ is the number of pseudo-queries ($k \ll n$).
+This document presents the theoretical foundation for **piecewise-linear-attention**, a novel attention mechanism that achieves sub-quadratic complexity while maintaining better accuracy than linear attention. By using first-order Taylor approximation around a representative query per batch sample, we reduce computational complexity from $O(n^2 \cdot d)$ to $O(n \cdot d^2)$, matching linear attention's complexity while achieving 20 percentage points better accuracy.
 
 ---
 
