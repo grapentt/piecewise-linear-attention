@@ -180,9 +180,17 @@ class ListOpsDataset(Dataset):
         """Generate dataset locally using generate_listops.py."""
         import subprocess
         import sys
+        import os
 
-        print(f"  Generating all splits (train, val, test)...")
-        print(f"  This may take a few minutes for 100K samples...")
+        # Check if LISTOPS_QUICK_TEST environment variable is set
+        quick_test = os.environ.get('LISTOPS_QUICK_TEST', '').lower() in ('1', 'true', 'yes')
+
+        if quick_test:
+            print("  Generating QUICK TEST dataset (reduced size for fast iteration)...")
+            print("  Train: 20000, Val: 1000, Test: 1000 samples")
+        else:
+            print("  Generating all splits (train, val, test)...")
+            print("  This may take a few minutes for 100K samples...")
 
         # Get the generator script path
         generator_script = Path(__file__).parent / "generate_listops.py"
@@ -194,6 +202,15 @@ class ListOpsDataset(Dataset):
             "--output-dir", str(self.data_dir),
             "--seed", "42",
         ]
+
+        # Add quick test parameters if enabled
+        if quick_test:
+            cmd.extend([
+                "--num-train", "20000",
+                "--num-val", "1000",
+                "--num-test", "1000",
+                "--max-length", "1000",  # Shorter sequences
+            ])
 
         try:
             result = subprocess.run(cmd, check=True, capture_output=True, text=True)
