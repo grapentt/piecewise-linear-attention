@@ -21,9 +21,9 @@ class LRAConfig:
 
     # Training
     batch_size: int = 32
-    learning_rate: float = 0.05
+    learning_rate: float = 1e-3  # 0.001 - much more reasonable for transformers
     num_epochs: int = 20  # For quick iteration; LRA uses 5000 steps
-    weight_decay: float = 1e-1
+    weight_decay: float = 1e-4  # Reduced from 1e-1 which was too aggressive
     warmup_steps: int = 1000
     grad_clip: float = 1.0
 

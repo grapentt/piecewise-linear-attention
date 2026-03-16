@@ -100,6 +100,18 @@ def main():
         default=0,
         help="Number of data loading workers (0=main thread)",
     )
+    parser.add_argument(
+        "--learning-rate",
+        type=float,
+        default=None,
+        help="Learning rate (default: use config value of 1e-3)",
+    )
+    parser.add_argument(
+        "--weight-decay",
+        type=float,
+        default=None,
+        help="Weight decay (default: use config value of 1e-4)",
+    )
     args = parser.parse_args()
 
     # Print configuration
@@ -119,6 +131,19 @@ def main():
     config.batch_size = args.batch_size
     config.num_epochs = args.epochs
     config.random_seed = args.seed
+
+    # Override learning rate and weight decay if provided
+    if args.learning_rate is not None:
+        config.learning_rate = args.learning_rate
+        print(f"  Learning rate (custom): {config.learning_rate}")
+    else:
+        print(f"  Learning rate: {config.learning_rate}")
+
+    if args.weight_decay is not None:
+        config.weight_decay = args.weight_decay
+        print(f"  Weight decay (custom): {config.weight_decay}")
+    else:
+        print(f"  Weight decay: {config.weight_decay}")
 
     # Get device
     device = get_device(args.device)
