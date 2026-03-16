@@ -148,10 +148,16 @@ def main():
     # Get device
     device = get_device(args.device)
 
+    # Adjust data directory for quick test to avoid conflicts
+    data_dir = args.data_dir
+    if os.environ.get('LISTOPS_QUICK_TEST', '').lower() in ('1', 'true', 'yes'):
+        data_dir = f"{args.data_dir}_quick"
+        print(f"\n⚡ Quick Test Mode: Using separate data directory: {data_dir}")
+
     # Load data
     print("\nLoading ListOps dataset...")
     train_loader, val_loader, test_loader = get_listops_dataloaders(
-        data_dir=args.data_dir,
+        data_dir=data_dir,
         batch_size=config.batch_size,
         max_length=config.max_length,
         download=True,
