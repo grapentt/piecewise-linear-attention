@@ -4,18 +4,13 @@ This transformer allows plugging in different attention types (standard, linear,
 for comparative analysis on machine translation tasks.
 """
 
-import sys
-from pathlib import Path
 from typing import Dict, Optional
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# Import our configurable multi-head attention
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
-from piecewise_linear_attention.models.multihead import MultiHeadAttention
+from .multihead import MultiHeadAttention
 
 
 class MLP(nn.Module):

@@ -1,31 +1,55 @@
-"""Benchmark transformer with different attention types on translation task.
+"""Train transformer with different attention types on translation task.
 
 This script compares StandardAttention, LinearAttention, and PiecewiseAttention
 in a full encoder-decoder transformer on machine translation.
 
 Usage:
-    python benchmarks/benchmark_transformer.py
-    python benchmarks/benchmark_transformer.py --dataset opus_books --src en --tgt fr
-    python benchmarks/benchmark_transformer.py --epochs 10 --save results.json
+    python experiments/translation/train.py
+    python experiments/translation/train.py --dataset opus_books --src en --tgt fr
+    python experiments/translation/train.py --epochs 10 --save results/translation/results.json
 """
 
 import argparse
 import json
+import random
 import sys
 import time
 from functools import partial
 from pathlib import Path
 from typing import Dict, List
 
+import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 
-# Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Add project root to path
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
 
-from benchmarks.utils import prepare_dataset, collate_fn, train_epoch, evaluate
-from experiments.transformer_configurable import ConfigurableTransformer
+from experiments.utils.data import prepare_dataset, collate_fn
+from experiments.utils.training import train_epoch, evaluate
+from piecewise_linear_attention.models.translation_transformer import ConfigurableTransformer
+
+
+def set_seed(seed: int = 42):
+    """Set random seeds for reproducibility.
+
+    This ensures all attention variants get identical:
+    - Model initializations
+    - Data shuffling order
+    - Data augmentation samples
+
+    Args:
+        seed: Random seed value
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    # Make PyTorch deterministic (may impact performance slightly)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 
 def run_transformer_benchmark(
@@ -44,6 +68,7 @@ def run_transformer_benchmark(
     batch_size: int,
     learning_rate: float,
     device: str,
+    log_every: int = 1,
 ) -> Dict:
     """Run benchmark for one attention type.
 
@@ -63,6 +88,7 @@ def run_transformer_benchmark(
         batch_size: Batch size
         learning_rate: Learning rate
         device: Device to use
+        log_every: Log metrics every N epochs (also logs first and last)
 
     Returns:
         Dictionary with training results
@@ -136,26 +162,27 @@ def run_transformer_benchmark(
     total_train_time = 0.0
 
     for epoch in range(epochs):
-        print(f"\n{'─' * 80}")
-        print(f"Epoch {epoch + 1}/{epochs}")
-        print(f"{'─' * 80}")
-
         # Train
         train_metrics = train_epoch(model, train_loader, optimizer, device=device)
         total_train_time += train_metrics["time_seconds"]
 
-        print(f"Train - Loss: {train_metrics['loss']:.4f}, "
-              f"Perplexity: {train_metrics['perplexity']:.2f}, "
-              f"Time: {train_metrics['time_seconds']:.1f}s, "
-              f"Speed: {train_metrics['samples_per_second']:.1f} samples/s")
-
         # Evaluate
         eval_metrics = evaluate(model, eval_loader, device=device)
-        print(f"Eval  - Loss: {eval_metrics['loss']:.4f}, "
-              f"Perplexity: {eval_metrics['perplexity']:.2f}")
 
         train_history.append(train_metrics)
         eval_history.append(eval_metrics)
+
+        # Log if appropriate
+        if (epoch + 1) % log_every == 0 or epoch == 0 or epoch == epochs - 1:
+            print(f"\n{'─' * 80}")
+            print(f"Epoch {epoch + 1}/{epochs}")
+            print(f"{'─' * 80}")
+            print(f"Train - Loss: {train_metrics['loss']:.4f}, "
+                  f"Perplexity: {train_metrics['perplexity']:.2f}, "
+                  f"Time: {train_metrics['time_seconds']:.1f}s, "
+                  f"Speed: {train_metrics['samples_per_second']:.1f} samples/s")
+            print(f"Eval  - Loss: {eval_metrics['loss']:.4f}, "
+                  f"Perplexity: {eval_metrics['perplexity']:.2f}")
 
     # Final summary
     final_train = train_history[-1]
@@ -310,6 +337,18 @@ def main():
         default="cpu",
         help="Device to use (default: cpu)",
     )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for reproducibility (default: 42)",
+    )
+    parser.add_argument(
+        "--log-every",
+        type=int,
+        default=1,
+        help="Log metrics every N epochs (default: 1)",
+    )
 
     args = parser.parse_args()
 
@@ -322,12 +361,17 @@ def main():
     print(f"Training: {args.epochs} epochs, batch={args.batch_size}, lr={args.lr}")
     print(f"Comparing: {', '.join(args.attention_types)}")
     print(f"Device: {args.device}")
+    print(f"Random Seed: {args.seed}")
     print()
 
     # Run benchmarks for each attention type
     results = []
 
     for attention_type in args.attention_types:
+        # Set the same seed before each experiment for fair comparison
+        print(f"\n🎲 Setting random seed to {args.seed} for {attention_type} attention...")
+        set_seed(args.seed)
+
         try:
             result = run_transformer_benchmark(
                 attention_type=attention_type,
@@ -345,6 +389,7 @@ def main():
                 batch_size=args.batch_size,
                 learning_rate=args.lr,
                 device=args.device,
+                log_every=args.log_every,
             )
             results.append(result)
 
