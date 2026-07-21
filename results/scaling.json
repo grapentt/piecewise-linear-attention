@@ -4,11 +4,10 @@
     "benchmark": "scaling",
     "dim": 24,
     "lengths": [
-      128,
-      256,
       512,
       1024,
-      2048
+      2048,
+      4096
     ],
     "num_anchors": 4,
     "repeats": 50,
@@ -22,54 +21,55 @@
   "history": {
     "grid": [
       {
-        "seq_len": 128,
-        "wall_ms": {
-          "linear": 0.2515949960798025,
-          "performer": 1.1881866632029414,
-          "piecewise_stride": 3.300573341548443,
-          "standard": 0.6106308382004499
-        }
-      },
-      {
-        "seq_len": 256,
-        "wall_ms": {
-          "linear": 0.5186591623350978,
-          "performer": 2.844505002722144,
-          "piecewise_stride": 6.5036783227697015,
-          "standard": 1.9630025001242755
-        }
-      },
-      {
         "seq_len": 512,
         "wall_ms": {
-          "linear": 1.0974666569381952,
-          "performer": 5.8374600019305944,
-          "piecewise_stride": 12.866155821830034,
-          "standard": 7.865660842508078
+          "linear": 1.0552683379501104,
+          "performer": 5.756774162873626,
+          "piecewise_mean": 1.4781958190724254,
+          "piecewise_stride": 12.772978339344263,
+          "standard": 7.607809156179428
         }
       },
       {
         "seq_len": 1024,
         "wall_ms": {
-          "linear": 2.1706199971958995,
-          "performer": 11.849668342620134,
-          "piecewise_stride": 25.725319180637598,
-          "standard": 30.9822216629982
+          "linear": 2.173574180342257,
+          "performer": 11.820045839995146,
+          "piecewise_mean": 2.8519249986857176,
+          "piecewise_stride": 25.643411660566926,
+          "standard": 30.76853834092617
         }
       },
       {
         "seq_len": 2048,
         "wall_ms": {
-          "linear": 4.358933339826763,
-          "performer": 24.0717349993065,
-          "piecewise_stride": 51.67320168111473,
-          "standard": 125.23212417960167
+          "linear": 4.2737416829913855,
+          "performer": 23.515259181149304,
+          "piecewise_mean": 5.620590839534998,
+          "piecewise_stride": 52.978833336383104,
+          "standard": 124.5753183402121
+        }
+      },
+      {
+        "seq_len": 4096,
+        "wall_ms": {
+          "linear": 9.449020000174642,
+          "performer": 48.58814083971083,
+          "piecewise_mean": 12.427860824391246,
+          "piecewise_stride": 106.09276000410318,
+          "standard": 552.6247275015339
         }
       }
     ]
   },
   "metrics": {
-    "crossover_n": 1024
+    "crossover_n": 1024,
+    "speedup_vs_performer": {
+      "512": 3.8944597790068354,
+      "1024": 4.1445850944335145,
+      "2048": 4.183769972321053,
+      "4096": 3.909614174657514
+    }
   },
   "schema_version": 1
 }
