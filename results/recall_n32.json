@@ -1,0 +1,210 @@
+{
+  "config": {
+    "benchmark": "recall",
+    "lengths": [
+      32
+    ],
+    "seeds": [
+      0
+    ]
+  },
+  "environment": {
+    "device": "mps",
+    "platform": "macOS-26.5.1-arm64-arm-64bit",
+    "torch": "2.10.0"
+  },
+  "history": {
+    "runs": [
+      {
+        "config": {
+          "attention_kwargs": {},
+          "attention_type": "standard",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "a3e06e5",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "standard-n32-s0",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 0,
+          "seq_len": 32,
+          "steps": 2000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 1.0,
+          "loss": 0.0007141312235035002,
+          "params": 155536,
+          "train_time_s": 11.779909875011072
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {
+            "kernel_type": "elu"
+          },
+          "attention_type": "linear",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "a3e06e5",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "linear-n32-s0",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 0,
+          "seq_len": 32,
+          "steps": 2000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 0.16328125,
+          "loss": 2.4321115016937256,
+          "params": 155536,
+          "train_time_s": 11.05359850008972
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {},
+          "attention_type": "performer",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "a3e06e5",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "performer-n32-s0",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 0,
+          "seq_len": 32,
+          "steps": 2000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 1.0,
+          "loss": 0.00031896380824036896,
+          "params": 155536,
+          "train_time_s": 12.662721541943029
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {},
+          "attention_type": "piecewise",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "a3e06e5",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "piecewise-n32-s0",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 0,
+          "seq_len": 32,
+          "steps": 2000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 1.0,
+          "loss": 0.008408387191593647,
+          "params": 155536,
+          "train_time_s": 12.775428415974602
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {
+            "num_anchors": 4
+          },
+          "attention_type": "piecewise_kmeans",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "a3e06e5",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "piecewise_kmeans-n32-s0",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 0,
+          "seq_len": 32,
+          "steps": 2000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 1.0,
+          "loss": 0.0007817120640538633,
+          "params": 155536,
+          "train_time_s": 27.5350331668742
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {
+            "num_anchors": 4
+          },
+          "attention_type": "piecewise_stride",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "a3e06e5",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "piecewise_stride-n32-s0",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 0,
+          "seq_len": 32,
+          "steps": 2000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 1.0,
+          "loss": 0.0011772280558943748,
+          "params": 155536,
+          "train_time_s": 24.670938125113025
+        }
+      }
+    ]
+  },
+  "metrics": {
+    "random_baseline": 0.0625
+  },
+  "schema_version": 1
+}

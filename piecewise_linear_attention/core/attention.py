@@ -8,11 +8,14 @@ This module provides three attention implementations:
 
 import math
 from abc import ABC, abstractmethod
-from typing import Optional, Tuple, Callable
+from typing import TYPE_CHECKING, Callable, Optional, Tuple
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+if TYPE_CHECKING:
+    from .anchors import AnchorStrategy
 
 
 class BaseAttention(nn.Module, ABC):
@@ -221,11 +224,144 @@ class LinearAttention(BaseAttention):
             # Compute normalization: φ(Q) @ φ(K)^T @ 1
             # Shape: (batch, seq_len, 1)
             normalization = torch.matmul(
-                Q_prime,
-                K_prime.sum(dim=1, keepdim=True).transpose(-2, -1)
+                Q_prime, K_prime.sum(dim=1, keepdim=True).transpose(-2, -1)
             )
 
         # Normalize output
+        output = numerator / (normalization + self.eps)
+        output = self.dropout(output)
+
+        return output, normalization
+
+
+class PerformerAttention(BaseAttention):
+    """Performer attention with FAVOR+ positive random features.
+
+    Approximates softmax attention in linear time using positive random
+    features (Choromanski et al., 2021, "Rethinking Attention with
+    Performers"). The softmax kernel exp(q·k / sqrt(d)) is estimated with an
+    unbiased positive-feature map
+
+        phi(x) = exp(W x - ||x||^2 / 2) / sqrt(m)
+
+    applied to scaled queries/keys, giving
+
+        Attention(Q, K, V) ~= phi(Q) @ (phi(K)^T @ V) / (phi(Q) @ phi(K)^T @ 1).
+
+    The random projection ``W`` (shape ``(num_features, dim)``) is drawn once
+    from a fixed seed and stored as a registered buffer, so it moves with
+    ``.to(device)`` and stays constant across forward passes — the estimator is
+    deterministic for a given seed, which matters for reproducible training and
+    evaluation.
+
+    Complexity: O(batch * n * m * d).
+
+    Parameters
+    ----------
+    dim:
+        Per-head embedding dimension.
+    dropout:
+        Dropout probability applied to the output.
+    num_features:
+        Number of random features ``m``. Defaults to ``max(2 * dim, 64)``.
+    eps:
+        Numerical-stability constant added to features and denominator.
+    causal:
+        If True, use a causal prefix-sum formulation (query i attends to keys
+        0..i).
+    seed:
+        Seed for the random projection; logged with experiment results so runs
+        are reproducible.
+    """
+
+    def __init__(
+        self,
+        dim: int,
+        dropout: float = 0.0,
+        num_features: Optional[int] = None,
+        eps: float = 1e-6,
+        causal: bool = False,
+        seed: int = 0,
+    ):
+        super().__init__(dim, dropout)
+        self.num_features = num_features if num_features is not None else max(2 * dim, 64)
+        self.eps = eps
+        self.causal = causal
+        self.seed = seed
+
+        # Draw the random projection once from a fixed seed on CPU, then register
+        # it as a (non-persistent) buffer so it participates in .to()/.cuda()
+        # moves but is regenerated deterministically rather than stored in
+        # checkpoints. Shape: (num_features, dim).
+        generator = torch.Generator(device="cpu").manual_seed(seed)
+        projection = torch.randn(self.num_features, dim, generator=generator)
+        self.register_buffer("projection", projection, persistent=False)
+
+    def feature_map(self, x: torch.Tensor) -> torch.Tensor:
+        """Apply the FAVOR+ positive random-feature map phi(x).
+
+        Parameters
+        ----------
+        x:
+            Input tensor of shape ``(..., dim)``.
+
+        Returns
+        -------
+        torch.Tensor
+            Positive features of shape ``(..., num_features)``.
+        """
+        # Scale inputs by d^{-1/4} so that dot products of scaled q, k reproduce
+        # the softmax argument q·k / sqrt(d).
+        scale = self.dim**0.25
+        xs = x / scale
+        # Projection onto random directions: (..., num_features).
+        proj = xs @ self.projection.t()
+        # Stabilizer term ||xs||^2 / 2 (broadcast over the feature axis).
+        norm = (xs**2).sum(dim=-1, keepdim=True) / 2.0
+        features = torch.exp(proj - norm) / math.sqrt(self.num_features)
+        return features + self.eps
+
+    def forward(
+        self,
+        Q: torch.Tensor,
+        K: torch.Tensor,
+        V: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Compute Performer (FAVOR+) attention.
+
+        Parameters
+        ----------
+        Q, K, V:
+            Query/key/value tensors of shape ``(batch, seq_len, dim)``.
+
+        Returns
+        -------
+        output:
+            Attention output of shape ``(batch, seq_len, dim)``.
+        normalization:
+            Denominator terms of shape ``(batch, seq_len, 1)``.
+        """
+        Q_prime = self.feature_map(Q)  # (batch, seq_len, num_features)
+        K_prime = self.feature_map(K)  # (batch, seq_len, num_features)
+
+        if self.causal:
+            # Prefix-sum formulation: query i attends to keys 0..i.
+            # kv[j] = phi(K_j) ⊗ V_j, cumulative-summed over the sequence.
+            k_prime_v = K_prime.unsqueeze(-1) * V.unsqueeze(-2)
+            k_prime_v_cumsum = torch.cumsum(k_prime_v, dim=1)
+            numerator = (k_prime_v_cumsum * Q_prime.unsqueeze(-1)).sum(dim=-2)
+
+            k_prime_cumsum = torch.cumsum(K_prime, dim=1)
+            normalization = (Q_prime * k_prime_cumsum).sum(dim=-1, keepdim=True)
+        else:
+            # Non-causal: full-context linear attention via the (m, d) memory.
+            memory_matrix = torch.matmul(K_prime.transpose(-2, -1), V)  # (b, m, d)
+            numerator = torch.matmul(Q_prime, memory_matrix)  # (b, n, d)
+            normalization = torch.matmul(
+                Q_prime,
+                K_prime.sum(dim=1, keepdim=True).transpose(-2, -1),
+            )  # (b, n, 1)
+
         output = numerator / (normalization + self.eps)
         output = self.dropout(output)
 
@@ -259,6 +395,7 @@ class PiecewiseAttention(BaseAttention):
         pseudo_query_fn: Optional[Callable[[torch.Tensor], torch.Tensor]] = None,
         causal: bool = False,
         causal_pseudo_query: str = "mean",
+        anchor_strategy: Optional["AnchorStrategy"] = None,
     ):
         """Initialize piecewise attention.
 
@@ -273,14 +410,28 @@ class PiecewiseAttention(BaseAttention):
             causal_pseudo_query: Strategy for selecting pseudo-query in causal mode.
                                "mean": mean of all queries (best for training with full sequence)
                                "first": first query (best for autoregressive inference)
+            anchor_strategy: Optional multi-anchor strategy. When provided and it
+                           yields more than one anchor, each query is linearized
+                           around its nearest anchor (non-causal mode only). When
+                           ``None`` or single-anchor, the original single-anchor
+                           behavior is used unchanged.
         """
         super().__init__(dim, dropout)
         self.scale = scale
         self.causal = causal
         self.causal_pseudo_query = causal_pseudo_query
         if causal_pseudo_query not in ("mean", "first"):
-            raise ValueError(f"causal_pseudo_query must be 'mean' or 'first', got {causal_pseudo_query}")
+            raise ValueError(
+                f"causal_pseudo_query must be 'mean' or 'first', got {causal_pseudo_query}"
+            )
         self.pseudo_query_fn = pseudo_query_fn or self._default_pseudo_query
+        self.anchor_strategy = anchor_strategy
+        if (
+            anchor_strategy is not None
+            and getattr(anchor_strategy, "num_anchors", 1) > 1
+            and causal
+        ):
+            raise ValueError("Multi-anchor strategies are only supported in non-causal mode")
 
     def _default_pseudo_query(self, Q: torch.Tensor) -> torch.Tensor:
         """Default pseudo-query selector: mean of all queries in each sample.
@@ -350,6 +501,60 @@ class PiecewiseAttention(BaseAttention):
         jacobian = scale_factor * (weighted_outer - outer_weighted)
 
         return output, jacobian
+
+    def _compute_multi_anchor(
+        self,
+        Q: torch.Tensor,
+        K: torch.Tensor,
+        V: torch.Tensor,
+        anchors: torch.Tensor,
+    ) -> torch.Tensor:
+        """Piecewise-linear attention with per-query nearest-anchor expansion.
+
+        Each query is linearized around its nearest anchor:
+        ``out_i = A(a_{j(i)}) + J(a_{j(i)}) @ (q_i - a_{j(i)})`` where ``j(i)`` is
+        the index of the anchor closest to query ``i``.
+
+        This is the multi-anchor ("piecewise") generalization of the
+        single-anchor Taylor expansion, computed in a fully batched way. It is
+        O(batch * (m + seq_len) * dim^2) — cheap in the number of anchors ``m``.
+
+        Args:
+            Q: Query tensor of shape (batch, seq_len, dim).
+            K: Key tensor of shape (batch, seq_len, dim).
+            V: Value tensor of shape (batch, seq_len, dim).
+            anchors: Anchor tensor of shape (batch, m, dim).
+
+        Returns:
+            output: Attention output of shape (batch, seq_len, dim).
+        """
+        _, _, dim = Q.shape
+        scale_factor = 1.0 / math.sqrt(dim) if self.scale else 1.0
+
+        # Exact softmax attention output and analytic Jacobian at each anchor.
+        # scores: (batch, m, seq_len)
+        scores = torch.einsum("bmd,bnd->bmn", anchors, K) * scale_factor
+        alpha = torch.softmax(scores, dim=-1)  # (batch, m, seq_len)
+        out_anchor = torch.einsum("bmn,bnd->bmd", alpha, V)  # (batch, m, dim)
+        weighted_k = torch.einsum("bmn,bnd->bmd", alpha, K)  # (batch, m, dim)
+        weighted_outer = torch.einsum("bmn,bnd,bne->bmde", alpha, V, K)  # (b,m,d,d)
+        outer_weighted = out_anchor.unsqueeze(-1) @ weighted_k.unsqueeze(-2)  # (b,m,d,d)
+        jac_anchor = scale_factor * (weighted_outer - outer_weighted)  # (b,m,d,d)
+
+        # Hard-assign each query to its nearest anchor (non-differentiable).
+        with torch.no_grad():
+            assign = torch.cdist(Q, anchors).argmin(dim=-1)  # (batch, seq_len)
+
+        # Gather the anchor, its output, and its Jacobian for each query.
+        idx_d = assign.unsqueeze(-1).expand(-1, -1, dim)  # (batch, seq_len, dim)
+        a_sel = torch.gather(anchors, 1, idx_d)  # (batch, seq_len, dim)
+        out_sel = torch.gather(out_anchor, 1, idx_d)  # (batch, seq_len, dim)
+        idx_dd = assign.view(*assign.shape, 1, 1).expand(-1, -1, dim, dim)
+        jac_sel = torch.gather(jac_anchor, 1, idx_dd)  # (batch, seq_len, dim, dim)
+
+        # First-order expansion around the selected anchor.
+        delta = (Q - a_sel).unsqueeze(-1)  # (batch, seq_len, dim, 1)
+        return out_sel + (jac_sel @ delta).squeeze(-1)
 
     def forward(
         self,
@@ -432,30 +637,47 @@ class PiecewiseAttention(BaseAttention):
             # Return anchor query as pseudo_queries for API compatibility
             pseudo_queries = q_bar
         else:
-            # Non-causal piecewise attention (original implementation)
-            # Step 1: Select representative query for each batch sample
-            pseudo_queries = self.pseudo_query_fn(Q)  # (batch, dim)
+            # Non-causal piecewise attention.
+            use_multi = (
+                self.anchor_strategy is not None
+                and getattr(self.anchor_strategy, "num_anchors", 1) > 1
+            )
+            if use_multi:
+                # Multi-anchor mode: each query is linearized around its nearest
+                # anchor. The anchors double as the reported pseudo_queries.
+                anchors = self.anchor_strategy.select(Q)  # (batch, m, dim)
+                output = self._compute_multi_anchor(Q, K, V, anchors)
+                pseudo_queries = anchors
+            else:
+                # Single-anchor mode (original implementation).
+                # Step 1: Select representative query for each batch sample.
+                if self.anchor_strategy is not None:
+                    # A single-anchor strategy yields (batch, 1, dim); squeeze it
+                    # back to the legacy (batch, dim) representative query.
+                    pseudo_queries = self.anchor_strategy.select(Q).squeeze(1)
+                else:
+                    pseudo_queries = self.pseudo_query_fn(Q)  # (batch, dim)
 
-            # Step 2: Compute exact attention and Jacobian at pseudo-queries
-            pseudo_outputs, jacobians = self._compute_attention_and_jacobian(
-                pseudo_queries, K, V
-            )  # (batch, dim), (batch, dim, dim)
+                # Step 2: Compute exact attention and Jacobian at pseudo-queries
+                pseudo_outputs, jacobians = self._compute_attention_and_jacobian(
+                    pseudo_queries, K, V
+                )  # (batch, dim), (batch, dim, dim)
 
-            # Step 3: Apply first-order Taylor approximation to all queries
-            # output[b, i] = pseudo_outputs[b] + jacobians[b] @ (Q[b, i] - pseudo_queries[b])
+                # Step 3: Apply first-order Taylor approximation to all queries
+                # output[b, i] = pseudo_outputs[b] + jacobians[b] @ (Q[b, i] - pseudo_queries[b])
 
-            # Compute deltas: Q - pseudo_queries
-            # Shape: (batch, seq_len, dim)
-            deltas = Q - pseudo_queries.unsqueeze(1)
+                # Compute deltas: Q - pseudo_queries
+                # Shape: (batch, seq_len, dim)
+                deltas = Q - pseudo_queries.unsqueeze(1)
 
-            # Apply Jacobian to deltas: J @ Δq
-            # Batched matrix-vector multiplication
-            # Shape: (batch, seq_len, dim)
-            jacobian_deltas = (jacobians @ deltas.transpose(-2, -1)).transpose(-2, -1)
+                # Apply Jacobian to deltas: J @ Δq
+                # Batched matrix-vector multiplication
+                # Shape: (batch, seq_len, dim)
+                jacobian_deltas = (jacobians @ deltas.transpose(-2, -1)).transpose(-2, -1)
 
-            # Final output: A(q̃) + J @ Δq
-            # Shape: (batch, seq_len, dim)
-            output = pseudo_outputs.unsqueeze(1) + jacobian_deltas
+                # Final output: A(q̃) + J @ Δq
+                # Shape: (batch, seq_len, dim)
+                output = pseudo_outputs.unsqueeze(1) + jacobian_deltas
 
         # Apply dropout
         output = self.dropout(output)
@@ -471,6 +693,7 @@ __all__ = [
     "BaseAttention",
     "StandardAttention",
     "LinearAttention",
+    "PerformerAttention",
     "PiecewiseAttention",
     "EfficientAttention",
 ]

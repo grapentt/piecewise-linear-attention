@@ -1,0 +1,466 @@
+{
+  "config": {
+    "benchmark": "recall_curve",
+    "lengths": [
+      64
+    ],
+    "seeds": [
+      0
+    ],
+    "steps": 7000
+  },
+  "environment": {
+    "device": "mps",
+    "platform": "macOS-26.5.1-arm64-arm-64bit",
+    "torch": "2.10.0"
+  },
+  "history": {
+    "runs": [
+      {
+        "config": {
+          "attention_kwargs": {},
+          "attention_type": "standard",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "a3e06e5",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "standard-n64-curve",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 0,
+          "seq_len": 64,
+          "steps": 7000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 1.0,
+          "curve": [
+            {
+              "accuracy": 0.1265625,
+              "step": 500
+            },
+            {
+              "accuracy": 0.115625,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.11953125,
+              "step": 1500
+            },
+            {
+              "accuracy": 0.13203125,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.12890625,
+              "step": 2500
+            },
+            {
+              "accuracy": 0.121875,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.1171875,
+              "step": 3500
+            },
+            {
+              "accuracy": 0.13046875,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.12734375,
+              "step": 4500
+            },
+            {
+              "accuracy": 0.5734375,
+              "step": 5000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 5500
+            },
+            {
+              "accuracy": 1.0,
+              "step": 6000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 6500
+            },
+            {
+              "accuracy": 1.0,
+              "step": 7000
+            }
+          ],
+          "loss": 0.0002054841024801135,
+          "train_time_s": 54.86719054193236
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {
+            "kernel_type": "elu"
+          },
+          "attention_type": "linear",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "a3e06e5",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "linear-n64-curve",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 0,
+          "seq_len": 64,
+          "steps": 7000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 0.1234375,
+          "curve": [
+            {
+              "accuracy": 0.11640625,
+              "step": 500
+            },
+            {
+              "accuracy": 0.11953125,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.13515625,
+              "step": 1500
+            },
+            {
+              "accuracy": 0.134375,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.1296875,
+              "step": 2500
+            },
+            {
+              "accuracy": 0.12109375,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.12265625,
+              "step": 3500
+            },
+            {
+              "accuracy": 0.13125,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.1296875,
+              "step": 4500
+            },
+            {
+              "accuracy": 0.12421875,
+              "step": 5000
+            },
+            {
+              "accuracy": 0.1171875,
+              "step": 5500
+            },
+            {
+              "accuracy": 0.12734375,
+              "step": 6000
+            },
+            {
+              "accuracy": 0.12421875,
+              "step": 6500
+            },
+            {
+              "accuracy": 0.1234375,
+              "step": 7000
+            }
+          ],
+          "loss": 2.5622124671936035,
+          "train_time_s": 56.10268387501128
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {},
+          "attention_type": "piecewise",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "a3e06e5",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "piecewise-n64-curve",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 0,
+          "seq_len": 64,
+          "steps": 7000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 0.14453125,
+          "curve": [
+            {
+              "accuracy": 0.11796875,
+              "step": 500
+            },
+            {
+              "accuracy": 0.11484375,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.134375,
+              "step": 1500
+            },
+            {
+              "accuracy": 0.13359375,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.13359375,
+              "step": 2500
+            },
+            {
+              "accuracy": 0.1171875,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.121875,
+              "step": 3500
+            },
+            {
+              "accuracy": 0.12734375,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.125,
+              "step": 4500
+            },
+            {
+              "accuracy": 0.115625,
+              "step": 5000
+            },
+            {
+              "accuracy": 0.11484375,
+              "step": 5500
+            },
+            {
+              "accuracy": 0.1296875,
+              "step": 6000
+            },
+            {
+              "accuracy": 0.14375,
+              "step": 6500
+            },
+            {
+              "accuracy": 0.14453125,
+              "step": 7000
+            }
+          ],
+          "loss": 2.5176773071289062,
+          "train_time_s": 61.846969166072085
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {
+            "num_anchors": 4
+          },
+          "attention_type": "piecewise_kmeans",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "a3e06e5",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "piecewise_kmeans-n64-curve",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 0,
+          "seq_len": 64,
+          "steps": 7000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 0.9828125,
+          "curve": [
+            {
+              "accuracy": 0.1203125,
+              "step": 500
+            },
+            {
+              "accuracy": 0.11875,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.1296875,
+              "step": 1500
+            },
+            {
+              "accuracy": 0.13046875,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.128125,
+              "step": 2500
+            },
+            {
+              "accuracy": 0.12578125,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.1203125,
+              "step": 3500
+            },
+            {
+              "accuracy": 0.12734375,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.12890625,
+              "step": 4500
+            },
+            {
+              "accuracy": 0.48203125,
+              "step": 5000
+            },
+            {
+              "accuracy": 0.946875,
+              "step": 5500
+            },
+            {
+              "accuracy": 0.9703125,
+              "step": 6000
+            },
+            {
+              "accuracy": 0.9765625,
+              "step": 6500
+            },
+            {
+              "accuracy": 0.9828125,
+              "step": 7000
+            }
+          ],
+          "loss": 0.027021236717700958,
+          "train_time_s": 209.75722691603005
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {
+            "num_anchors": 4
+          },
+          "attention_type": "piecewise_stride",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "a3e06e5",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "piecewise_stride-n64-curve",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 0,
+          "seq_len": 64,
+          "steps": 7000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 0.9890625,
+          "curve": [
+            {
+              "accuracy": 0.1203125,
+              "step": 500
+            },
+            {
+              "accuracy": 0.115625,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.125,
+              "step": 1500
+            },
+            {
+              "accuracy": 0.134375,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.128125,
+              "step": 2500
+            },
+            {
+              "accuracy": 0.12109375,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.12265625,
+              "step": 3500
+            },
+            {
+              "accuracy": 0.48515625,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.8234375,
+              "step": 4500
+            },
+            {
+              "accuracy": 0.959375,
+              "step": 5000
+            },
+            {
+              "accuracy": 0.99453125,
+              "step": 5500
+            },
+            {
+              "accuracy": 0.99296875,
+              "step": 6000
+            },
+            {
+              "accuracy": 0.9953125,
+              "step": 6500
+            },
+            {
+              "accuracy": 0.9890625,
+              "step": 7000
+            }
+          ],
+          "loss": 0.001458923565223813,
+          "train_time_s": 203.77207629196346
+        }
+      }
+    ]
+  },
+  "metrics": {
+    "random_baseline": 0.0625
+  },
+  "schema_version": 1
+}

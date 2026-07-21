@@ -4,11 +4,12 @@ This module provides a drop-in replacement for standard multi-head attention
 that works with StandardAttention, LinearAttention, and PiecewiseAttention mechanisms.
 """
 
+from typing import Callable, Optional
+
 import torch
 import torch.nn as nn
-from typing import Optional, Callable
 
-from ..core.attention import PiecewiseAttention, StandardAttention, LinearAttention
+from ..core.registry import build_attention
 
 
 class MultiHeadAttention(nn.Module):
@@ -41,6 +42,8 @@ class MultiHeadAttention(nn.Module):
         pseudo_query_fn: Optional[Callable] = None,
         kernel_type: str = "elu",
         causal: bool = False,
+        eps: float = 1e-6,
+        causal_pseudo_query: str = "mean",
         device: Optional[torch.device] = None,
     ):
         """Initialize multi-head attention.
@@ -53,6 +56,9 @@ class MultiHeadAttention(nn.Module):
             pseudo_query_fn: For piecewise attention, how to select representative query
             kernel_type: For linear attention, kernel type ("elu" or "relu")
             causal: If True, apply causal masking (query i can only attend to keys 0...i)
+            eps: For linear attention, numerical-stability constant
+            causal_pseudo_query: For causal piecewise attention, anchor strategy
+                ("mean" or "first")
             device: Device to place module on
         """
         super().__init__()
@@ -73,35 +79,23 @@ class MultiHeadAttention(nn.Module):
         # Output projection
         self.out_projection = nn.Linear(hidden_dim, hidden_dim)
 
-        # Create attention modules for each head
-        self.attention_heads = nn.ModuleList()
-        for _ in range(num_heads):
-            if attention_type == "standard":
-                attn = StandardAttention(
-                    dim=self.attn_dim,
-                    dropout=dropout,
-                    scale=True,
-                    causal=causal
-                )
-            elif attention_type == "linear":
-                attn = LinearAttention(
-                    dim=self.attn_dim,
-                    dropout=dropout,
-                    kernel_type=kernel_type,
-                    causal=causal
-                )
-            elif attention_type == "piecewise":
-                attn = PiecewiseAttention(
-                    dim=self.attn_dim,
-                    dropout=dropout,
-                    pseudo_query_fn=pseudo_query_fn,
-                    scale=True,
-                    causal=causal
-                )
-            else:
-                raise ValueError(f"Unknown attention_type: {attention_type}. Must be 'standard', 'linear', or 'piecewise'")
-
-            self.attention_heads.append(attn)
+        # Single attention module shared across heads. The attention
+        # implementations are parameter-free (pure functions of their config),
+        # so all heads are computed in one batched call over the flattened
+        # (batch * num_heads) dimension rather than a Python loop. Construction
+        # is routed through the registry so every registered mechanism is usable
+        # here without editing this class.
+        self.attention = build_attention(
+            attention_type,
+            dim=self.attn_dim,
+            dropout=dropout,
+            causal=causal,
+            scale=True,
+            kernel_type=kernel_type,
+            eps=eps,
+            pseudo_query_fn=pseudo_query_fn,
+            causal_pseudo_query=causal_pseudo_query,
+        )
 
         # For visualization and analysis
         self.last_attention = None
@@ -112,7 +106,7 @@ class MultiHeadAttention(nn.Module):
     def forward(
         self,
         attending_states: torch.Tensor,  # [batch, query_len, hidden_dim]
-        attended_states: torch.Tensor,   # [batch, key_len, hidden_dim]
+        attended_states: torch.Tensor,  # [batch, key_len, hidden_dim]
     ) -> torch.Tensor:
         """Compute multi-head attention.
 
@@ -128,47 +122,56 @@ class MultiHeadAttention(nn.Module):
 
         # Project to Q, K, V
         Q = self.q_projection(attending_states)  # [batch, query_len, hidden_dim]
-        K = self.k_projection(attended_states)   # [batch, key_len, hidden_dim]
-        V = self.v_projection(attended_states)   # [batch, key_len, hidden_dim]
+        K = self.k_projection(attended_states)  # [batch, key_len, hidden_dim]
+        V = self.v_projection(attended_states)  # [batch, key_len, hidden_dim]
 
-        # Split into heads: [batch, seq, hidden_dim] → [batch, seq, num_heads, attn_dim]
-        Q = Q.view(batch_size, query_len, self.num_heads, self.attn_dim)
-        K = K.view(batch_size, key_len, self.num_heads, self.attn_dim)
-        V = V.view(batch_size, key_len, self.num_heads, self.attn_dim)
-
-        # Apply attention per head
-        head_outputs = []
-        head_attns = []
-
-        for head_idx in range(self.num_heads):
-            # Extract this head's Q, K, V: [batch, seq, attn_dim]
-            q_head = Q[:, :, head_idx, :]
-            k_head = K[:, :, head_idx, :]
-            v_head = V[:, :, head_idx, :]
-
-            # Apply attention
-            output_head, attn_weights = self.attention_heads[head_idx](
-                q_head, k_head, v_head
+        # Split into heads and flatten heads into the batch dimension so a
+        # single attention call covers all heads:
+        #   [batch, seq, hidden_dim]
+        #     -> [batch, seq, num_heads, attn_dim]
+        #     -> [batch, num_heads, seq, attn_dim]
+        #     -> [batch * num_heads, seq, attn_dim]
+        def split_heads(t: torch.Tensor, seq: int) -> torch.Tensor:
+            return (
+                t.view(batch_size, seq, self.num_heads, self.attn_dim)
+                .permute(0, 2, 1, 3)
+                .reshape(batch_size * self.num_heads, seq, self.attn_dim)
             )
-            # output_head: [batch, query_len, attn_dim]
-            # attn_weights: [batch, query_len, key_len] or None (for piecewise/linear)
 
-            head_outputs.append(output_head)
-            head_attns.append(attn_weights)
+        Qh = split_heads(Q, query_len)  # [batch*heads, query_len, attn_dim]
+        Kh = split_heads(K, key_len)  # [batch*heads, key_len, attn_dim]
+        Vh = split_heads(V, key_len)  # [batch*heads, key_len, attn_dim]
 
-        # Concatenate heads: [batch, query_len, num_heads, attn_dim]
-        output = torch.stack(head_outputs, dim=2)
+        # One batched attention call over all heads.
+        # extra is attention weights [batch*heads, query_len, key_len] for
+        # standard attention, or an implementation-specific tensor otherwise.
+        attn_out, extra = self.attention(Qh, Kh, Vh)
 
-        # Reshape to [batch, query_len, hidden_dim]
-        output = output.reshape(batch_size, query_len, self.hidden_dim)
+        # Merge heads back: [batch*heads, query_len, attn_dim]
+        #   -> [batch, num_heads, query_len, attn_dim]
+        #   -> [batch, query_len, num_heads, attn_dim]
+        #   -> [batch, query_len, hidden_dim]
+        output = (
+            attn_out.view(batch_size, self.num_heads, query_len, self.attn_dim)
+            .permute(0, 2, 1, 3)
+            .reshape(batch_size, query_len, self.hidden_dim)
+        )
 
         # Final projection
         output = self.out_projection(output)
 
-        # Store attention for visualization (average across heads)
-        if head_attns[0] is not None:
-            self.last_attention = torch.stack(head_attns, dim=1).detach()
-            # Shape: [batch, num_heads, query_len, key_len]
+        # Store attention for visualization only when `extra` is a genuine
+        # per-head attention-weight matrix [batch*heads, query_len, key_len]
+        # (standard attention). Linear/piecewise return other tensors, so we
+        # gate on shape rather than on `extra is not None`.
+        if (
+            isinstance(extra, torch.Tensor)
+            and extra.dim() == 3
+            and extra.shape == (batch_size * self.num_heads, query_len, key_len)
+        ):
+            self.last_attention = extra.view(
+                batch_size, self.num_heads, query_len, key_len
+            ).detach()
         else:
             self.last_attention = None
 
