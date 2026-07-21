@@ -21,6 +21,37 @@ def queries():
     return torch.randn(4, 32, 16)
 
 
+def _reference_multi_anchor_gather(attn, Q, K, V, anchors):
+    """Naive multi-anchor apply: build a per-query (d, d) Jacobian and apply it.
+
+    This is a frozen copy of the straightforward, pre-optimization algebra: it
+    materializes the per-anchor Jacobian ``(batch, m, dim, dim)``, gathers it to
+    a per-query ``(batch, seq_len, dim, dim)`` tensor, and applies
+    ``out_i = A(a) + J(a) @ (q_i - a)``. It exists only as an independent
+    reference for the fused implementation and is deliberately not optimized.
+    """
+    _, _, dim = Q.shape
+    scale_factor = 1.0 / math.sqrt(dim) if attn.scale else 1.0
+
+    scores = torch.einsum("bmd,bnd->bmn", anchors, K) * scale_factor
+    alpha = torch.softmax(scores, dim=-1)
+    out_anchor = torch.einsum("bmn,bnd->bmd", alpha, V)
+    weighted_k = torch.einsum("bmn,bnd->bmd", alpha, K)
+    weighted_outer = torch.einsum("bmn,bnd,bne->bmde", alpha, V, K)
+    outer_weighted = out_anchor.unsqueeze(-1) @ weighted_k.unsqueeze(-2)
+    jac_anchor = scale_factor * (weighted_outer - outer_weighted)  # (b, m, d, d)
+
+    assign = torch.cdist(Q, anchors).argmin(dim=-1)  # (b, n)
+    idx_d = assign.unsqueeze(-1).expand(-1, -1, dim)
+    a_sel = torch.gather(anchors, 1, idx_d)
+    out_sel = torch.gather(out_anchor, 1, idx_d)
+    idx_dd = assign.view(*assign.shape, 1, 1).expand(-1, -1, dim, dim)
+    jac_sel = torch.gather(jac_anchor, 1, idx_dd)  # (b, n, d, d)
+
+    delta = (Q - a_sel).unsqueeze(-1)
+    return out_sel + (jac_sel @ delta).squeeze(-1)
+
+
 class TestAnchorShapes:
     """Every strategy returns (batch, num_anchors, dim)."""
 
@@ -145,6 +176,69 @@ class TestMultiAnchorAttention:
                 out_a, jac_a = attn._compute_attention_and_jacobian(a, K, V)
                 expected = out_a + (jac_a @ (q_i - a).unsqueeze(-1)).squeeze(-1)
                 assert torch.allclose(out[:, i, :], expected, atol=1e-5)
+
+    def test_fused_matches_gather_reference(self):
+        """Fused apply equals a naive per-query-Jacobian gather reference.
+
+        Locks: the fused ``O(seq_len·dim²)`` multi-anchor apply is numerically
+        equivalent to the straightforward implementation that materializes a
+        ``(batch, m, dim, dim)`` Jacobian, gathers it to ``(batch, seq_len, dim,
+        dim)`` per query, and applies it. The refactor changed *how* the
+        expansion is computed (distributing the matmul over the rank-1 Jacobian),
+        not *what* it computes.
+
+        Catches: any algebra error in the fusion — wrong einsum subscripts, a
+        dropped ``scale_factor``, a wrong sign on the rank-1 term, selecting the
+        wrong anchor slice, or an off-by-one in the assignment gather. None of
+        these would be caught by a shape or finiteness check.
+
+        Assessment: appropriate, not over-testing — this is the single
+        load-bearing test that the optimization preserves output. It overlaps
+        ``test_multi_anchor_hard_assignment`` only superficially: that test's
+        reference is the exact per-anchor Jacobian path
+        (``_compute_attention_and_jacobian``), so it validates *routing*, while
+        this one validates the *fusion algebra* against an independent
+        gather-based reference. One representative shape suffices.
+        """
+        torch.manual_seed(0)
+        b, n, d, m = 3, 40, 16, 4
+        Q = torch.randn(b, n, d)
+        K = torch.randn(b, n, d)
+        V = torch.randn(b, n, d)
+        attn = PiecewiseAttention(dim=d, scale=True, anchor_strategy=StrideAnchor(m))
+        with torch.no_grad():
+            out, anchors = attn(Q, K, V)
+            ref = _reference_multi_anchor_gather(attn, Q, K, V, anchors)
+        assert torch.allclose(out, ref, atol=1e-5)
+
+    @pytest.mark.parametrize("strategy", [StrideAnchor(4), KMeansAnchor(4)])
+    def test_multi_anchor_runs_in_float16(self, strategy):
+        """Multi-anchor forward runs under float16 on CPU without crashing.
+
+        Locks: the nearest-anchor assignment (``torch.cdist``) does not break
+        the multi-anchor path in half precision. ``cdist`` has no half-precision
+        kernel on CPU, so the assignment must be computed in a promoted dtype.
+
+        Catches: a hard ``NotImplementedError`` on fp16 for both StrideAnchor
+        and KMeansAnchor (``torch.cdist`` has no CPU half kernel).
+        Asserted directly (not wrapped in a skip) so the crash cannot be masked;
+        the sibling single-anchor fp16 test in ``test_optimization_correctness``
+        never exercises the anchor-assignment path, so this is the only guard.
+
+        Assessment: appropriate. It covers a real crash on a supported dtype for
+        a headline feature, across both distance-based strategies (which share
+        the cdist blocker); one representative shape per strategy suffices.
+        """
+        torch.manual_seed(0)
+        d = 16
+        Q = torch.randn(2, 12, d, dtype=torch.float16)
+        K = torch.randn(2, 12, d, dtype=torch.float16)
+        V = torch.randn(2, 12, d, dtype=torch.float16)
+        attn = PiecewiseAttention(dim=d, scale=True, anchor_strategy=strategy)
+        out, _ = attn(Q, K, V)
+        assert out.shape == Q.shape
+        assert out.dtype == torch.float16
+        assert torch.isfinite(out).all()
 
     def test_grad_flows_through_multi_anchor(self):
         """Gradients reach Q, K, V despite non-differentiable assignment.

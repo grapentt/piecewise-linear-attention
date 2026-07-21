@@ -132,19 +132,23 @@ class KMeansAnchor(AnchorStrategy):
         batch, seq_len, dim = Q.shape
         k = min(self.num_anchors, seq_len)
         with torch.no_grad():
+            # Lloyd's algorithm is run in float32: cdist has no half-precision
+            # kernel on some backends and scatter/division accumulate error in
+            # fp16. The selected anchors are cast back to the input dtype.
+            Qf = Q.float()
             # Deterministic init: evenly spaced queries as initial centroids.
             idx = torch.linspace(0, seq_len - 1, k, device=Q.device).round().long()
-            centroids = Q[:, idx, :].clone()  # (batch, k, dim)
+            centroids = Qf[:, idx, :].clone()  # (batch, k, dim)
 
             for _ in range(self.iters):
                 # Assign each query to its nearest centroid.
-                dists = torch.cdist(Q, centroids)  # (batch, seq_len, k)
+                dists = torch.cdist(Qf, centroids)  # (batch, seq_len, k)
                 assign = dists.argmin(dim=-1)  # (batch, seq_len)
 
                 # Recompute centroids as the mean of assigned queries.
                 new_centroids = torch.zeros_like(centroids)
                 counts = torch.zeros(batch, k, device=Q.device)
-                new_centroids.scatter_add_(1, assign.unsqueeze(-1).expand(-1, -1, dim), Q)
+                new_centroids.scatter_add_(1, assign.unsqueeze(-1).expand(-1, -1, dim), Qf)
                 counts.scatter_add_(1, assign, torch.ones(batch, seq_len, device=Q.device))
                 # Empty clusters keep their previous centroid (avoid div-by-zero).
                 nonempty = counts > 0
@@ -152,7 +156,7 @@ class KMeansAnchor(AnchorStrategy):
                 averaged = new_centroids / counts
                 centroids = torch.where(nonempty.unsqueeze(-1), averaged, centroids)
 
-        return centroids.detach()  # (batch, k, dim)
+        return centroids.to(Q.dtype).detach()  # (batch, k, dim)
 
 
 class CallableAnchor(AnchorStrategy):

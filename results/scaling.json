@@ -1,0 +1,75 @@
+{
+  "config": {
+    "batch": 256,
+    "benchmark": "scaling",
+    "dim": 24,
+    "lengths": [
+      128,
+      256,
+      512,
+      1024,
+      2048
+    ],
+    "num_anchors": 4,
+    "repeats": 50,
+    "warmup": 5
+  },
+  "environment": {
+    "device": "mps",
+    "platform": "macOS-26.5.1-arm64-arm-64bit",
+    "torch": "2.10.0"
+  },
+  "history": {
+    "grid": [
+      {
+        "seq_len": 128,
+        "wall_ms": {
+          "linear": 0.2515949960798025,
+          "performer": 1.1881866632029414,
+          "piecewise_stride": 3.300573341548443,
+          "standard": 0.6106308382004499
+        }
+      },
+      {
+        "seq_len": 256,
+        "wall_ms": {
+          "linear": 0.5186591623350978,
+          "performer": 2.844505002722144,
+          "piecewise_stride": 6.5036783227697015,
+          "standard": 1.9630025001242755
+        }
+      },
+      {
+        "seq_len": 512,
+        "wall_ms": {
+          "linear": 1.0974666569381952,
+          "performer": 5.8374600019305944,
+          "piecewise_stride": 12.866155821830034,
+          "standard": 7.865660842508078
+        }
+      },
+      {
+        "seq_len": 1024,
+        "wall_ms": {
+          "linear": 2.1706199971958995,
+          "performer": 11.849668342620134,
+          "piecewise_stride": 25.725319180637598,
+          "standard": 30.9822216629982
+        }
+      },
+      {
+        "seq_len": 2048,
+        "wall_ms": {
+          "linear": 4.358933339826763,
+          "performer": 24.0717349993065,
+          "piecewise_stride": 51.67320168111473,
+          "standard": 125.23212417960167
+        }
+      }
+    ]
+  },
+  "metrics": {
+    "crossover_n": 1024
+  },
+  "schema_version": 1
+}

@@ -50,3 +50,16 @@ class TestEvidenceCLISmoke:
         result = module.main(["--smoke", "--out", str(out)])
         assert out.exists()
         assert result.history["grid"], "no measurements recorded"
+
+    def test_scaling_smoke(self, tmp_path):
+        """run_scaling --smoke completes and writes a well-formed result.
+
+        Locks: the wall-clock scaling pipeline (build_attention -> timed forward
+        -> result schema). Catches a break in the timing loop, the device-sync
+        helper, or result serialization.
+        """
+        module = _load("_run_scaling_cli", "run_scaling.py")
+        out = tmp_path / "scaling.json"
+        result = module.main(["--smoke", "--out", str(out)])
+        assert out.exists()
+        assert result.history["grid"], "no measurements recorded"

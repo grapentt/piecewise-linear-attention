@@ -515,9 +515,22 @@ class PiecewiseAttention(BaseAttention):
         ``out_i = A(a_{j(i)}) + J(a_{j(i)}) @ (q_i - a_{j(i)})`` where ``j(i)`` is
         the index of the anchor closest to query ``i``.
 
-        This is the multi-anchor ("piecewise") generalization of the
-        single-anchor Taylor expansion, computed in a fully batched way. It is
-        O(batch * (m + seq_len) * dim^2) — cheap in the number of anchors ``m``.
+        The expansion is applied in a fused form that never materializes a
+        per-query ``(batch, seq_len, dim, dim)`` Jacobian. Distributing the
+        matmul over the rank-1 Jacobian gives, for a query linearized around
+        anchor ``j`` (``o_j`` = anchor output, ``wk_j`` = weighted keys,
+        ``M_j = Σ_n α_{jn} v_n k_nᵀ``, ``Δq = q - a_j``):
+
+            out = o_j + scale·(M_j @ Δq) − scale·o_j·(wk_jᵀ Δq),
+
+        which is algebraically identical to ``o_j + J_j @ Δq`` but needs only the
+        compact per-anchor factors ``o_j, wk_j`` (batch, m, dim) and ``M_j``
+        (batch, m, dim, dim). The expansion of every query around every anchor is
+        formed as a dense ``(batch, m, seq_len, dim)`` tensor and the assigned
+        slice is selected along the small anchor axis ``m``. This is
+        ``O(batch · m · seq_len · dim²)`` — with the constant ``m`` (typically
+        2–8) it is genuinely linear in ``seq_len``, unlike a ``O(seq_len²·dim)``
+        softmax, and avoids the large per-query Jacobian gather.
 
         Args:
             Q: Query tensor of shape (batch, seq_len, dim).
@@ -531,30 +544,38 @@ class PiecewiseAttention(BaseAttention):
         _, _, dim = Q.shape
         scale_factor = 1.0 / math.sqrt(dim) if self.scale else 1.0
 
-        # Exact softmax attention output and analytic Jacobian at each anchor.
-        # scores: (batch, m, seq_len)
+        # Exact softmax attention output and the compact analytic-Jacobian
+        # factors at each anchor. All are (batch, m, *) — no per-query (d, d)
+        # tensor is ever formed.
         scores = torch.einsum("bmd,bnd->bmn", anchors, K) * scale_factor
         alpha = torch.softmax(scores, dim=-1)  # (batch, m, seq_len)
         out_anchor = torch.einsum("bmn,bnd->bmd", alpha, V)  # (batch, m, dim)
         weighted_k = torch.einsum("bmn,bnd->bmd", alpha, K)  # (batch, m, dim)
         weighted_outer = torch.einsum("bmn,bnd,bne->bmde", alpha, V, K)  # (b,m,d,d)
-        outer_weighted = out_anchor.unsqueeze(-1) @ weighted_k.unsqueeze(-2)  # (b,m,d,d)
-        jac_anchor = scale_factor * (weighted_outer - outer_weighted)  # (b,m,d,d)
 
-        # Hard-assign each query to its nearest anchor (non-differentiable).
+        # Hard-assign each query to its nearest anchor (non-differentiable);
+        # gradients still flow through the expansion below w.r.t. Q, K, V.
+        # cdist has no half-precision kernel on some backends, so the distance
+        # is computed in float; the result is an integer index, so the upcast is
+        # free and does not affect the fp16 expansion below.
         with torch.no_grad():
-            assign = torch.cdist(Q, anchors).argmin(dim=-1)  # (batch, seq_len)
+            assign = torch.cdist(Q.float(), anchors.float()).argmin(dim=-1)  # (batch, seq_len)
 
-        # Gather the anchor, its output, and its Jacobian for each query.
-        idx_d = assign.unsqueeze(-1).expand(-1, -1, dim)  # (batch, seq_len, dim)
-        a_sel = torch.gather(anchors, 1, idx_d)  # (batch, seq_len, dim)
-        out_sel = torch.gather(out_anchor, 1, idx_d)  # (batch, seq_len, dim)
-        idx_dd = assign.view(*assign.shape, 1, 1).expand(-1, -1, dim, dim)
-        jac_sel = torch.gather(jac_anchor, 1, idx_dd)  # (batch, seq_len, dim, dim)
+        # Fused first-order expansion of every query around every anchor.
+        # delta_all[b, j, i] = q_i - a_j.
+        delta_all = Q.unsqueeze(1) - anchors.unsqueeze(2)  # (batch, m, seq_len, dim)
+        # M_j @ Δq for all anchors/queries.
+        m_term = torch.einsum("bmde,bmne->bmnd", weighted_outer, delta_all)  # (b,m,n,d)
+        # Rank-1 term o_j·(wk_jᵀ Δq) without forming any (d, d) product.
+        wk_dot = torch.einsum("bmd,bmnd->bmn", weighted_k, delta_all)  # (b,m,n)
+        rank1 = out_anchor.unsqueeze(2) * wk_dot.unsqueeze(-1)  # (b,m,n,d)
+        expanded = out_anchor.unsqueeze(2) + scale_factor * (m_term - rank1)  # (b,m,n,d)
 
-        # First-order expansion around the selected anchor.
-        delta = (Q - a_sel).unsqueeze(-1)  # (batch, seq_len, dim, 1)
-        return out_sel + (jac_sel @ delta).squeeze(-1)
+        # Select each query's assigned-anchor slice along the anchor axis m.
+        # This is a cheap O(seq_len·dim) gather, not the O(seq_len·dim²) gather
+        # of a full per-query Jacobian.
+        idx = assign.unsqueeze(1).unsqueeze(-1).expand(-1, 1, -1, dim)  # (b,1,n,d)
+        return torch.gather(expanded, 1, idx).squeeze(1)  # (batch, seq_len, dim)
 
     def forward(
         self,
