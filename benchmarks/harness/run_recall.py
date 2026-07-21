@@ -42,13 +42,18 @@ from piecewise_linear_attention.harness.tasks.synthetic_recall import (
 )
 
 # Methods under comparison. Multi-anchor presets carry their anchor count.
+# The piecewise variants differ only in anchor placement: ``piecewise`` and
+# ``piecewise_kmeans`` place anchors at query centroids (which minimize the mean
+# squared query-to-anchor distance that drives first-order error), while
+# ``piecewise_stride`` places them at fixed sequence positions (the weaker
+# baseline). ``piecewise`` is the single mean-centroid anchor.
 METHODS = [
     ("standard", {}),
     ("linear", {"kernel_type": "elu"}),
     ("performer", {}),
-    ("piecewise", {}),  # single-anchor (mean)
-    ("piecewise_kmeans", {"num_anchors": 4}),
-    ("piecewise_stride", {"num_anchors": 4}),
+    ("piecewise", {}),  # single mean-centroid anchor
+    ("piecewise_kmeans", {"num_anchors": 4}),  # centroid anchors
+    ("piecewise_stride", {"num_anchors": 4}),  # positional anchors (baseline)
 ]
 
 

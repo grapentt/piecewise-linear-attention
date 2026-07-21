@@ -55,15 +55,22 @@ def _sync(device):
 def _build_methods(dim, num_anchors):
     """Return name -> attention module for the scaling comparison.
 
-    ``standard`` is the quadratic baseline; ``linear``, ``performer`` and
-    ``piecewise_stride`` are the linear-in-``n`` methods under comparison. All
-    are non-causal.
+    ``standard`` is the quadratic baseline; ``linear``, ``performer`` and the
+    piecewise variants are the linear-in-``n`` methods under comparison. All are
+    non-causal.
+
+    ``piecewise_mean`` is the single mean-centroid anchor (the fastest piecewise
+    config and — because the centroid minimizes the mean squared query-to-anchor
+    distance that drives first-order error — also the most accurate first-order
+    one). ``piecewise_stride`` uses ``num_anchors`` positionally-placed anchors,
+    which is both slower and less accurate; it is kept as a baseline.
     """
     common = dict(dim=dim, dropout=0.0, causal=False)
     return {
         "standard": build_attention("standard", **common),
         "linear": build_attention("linear", **common),
         "performer": build_attention("performer", **common),
+        "piecewise_mean": build_attention("piecewise", **common),
         "piecewise_stride": build_attention("piecewise_stride", num_anchors=num_anchors, **common),
     }
 
@@ -135,6 +142,16 @@ def main(argv=None):
     else:
         print("piecewise_stride did not overtake softmax in the tested range")
 
+    # Speed of the single mean-anchor piecewise relative to Performer, per length
+    # (>1 means piecewise_mean is faster). This is the head-to-head that matters:
+    # the fastest piecewise config vs the strongest linear-time softmax estimator.
+    speedup_vs_performer = {
+        row["seq_len"]: row["wall_ms"]["performer"] / row["wall_ms"]["piecewise_mean"]
+        for row in rows
+    }
+    for seq_len, ratio in speedup_vs_performer.items():
+        print(f"  n={seq_len:5d}  piecewise_mean is {ratio:.2f}x performer")
+
     result = ExperimentResult(
         config={
             "benchmark": "scaling",
@@ -145,7 +162,10 @@ def main(argv=None):
             "warmup": args.warmup,
             "repeats": args.repeats,
         },
-        metrics={"crossover_n": crossover},
+        metrics={
+            "crossover_n": crossover,
+            "speedup_vs_performer": speedup_vs_performer,
+        },
         environment={
             "device": str(device),
             "torch": torch.__version__,
