@@ -20,6 +20,10 @@ python harness/run_microbench.py --out ../results/microbench.json
 python harness/run_recall.py --seeds 0 1 2 3 4 5 6 7 --lengths 64 \
     --steps 12000 --eval-every 1000 --out ../results/recall.json
 
+# Per-query fidelity to softmax on real captured activations vs length
+# -> results/real_activation_fidelity.json  (needs the benchmark extras)
+python harness/run_real_activation_fidelity.py --out ../results/real_activation_fidelity.json
+
 # Two-panel speed-vs-quality figure from the JSON above (PNG is not committed)
 python harness/plot_results.py --out ../results/speed_vs_quality.png
 ```
@@ -28,8 +32,10 @@ Methods compared: `standard`, `linear`, `performer`, `piecewise` (single mean an
 
 ### What the harness shows
 
-- **Speed** (`scaling.json`): the single mean-anchor forward is ~4× faster than Performer at `n=4096` and the linear-time methods cross below softmax around `n≈1024` (dim=24, B·H=256, MPS).
-- **Approximation quality** (`microbench.json`): centroid anchors (mean, k-means) track softmax more closely than positional (stride), linear, or Performer.
+- **Speed at one anchor** (`scaling.json`): the single mean-anchor forward is ~4× faster than Performer at `n=4096` and the linear-time methods cross below softmax around `n≈1024` (dim=24, B·H=256, MPS).
+- **Anchor-count cost** (`anchor_cost_sweep.json`): the apply is `O(batch·m·n·d²)`, linear in anchor count `m`. At `d=64–128` the single anchor is ~3–5× faster than Performer, but `m=16` is ~3–5× slower and `m=64` is 9–44× slower — so the speed advantage is specific to `m=1`.
+- **Approximation quality on synthetic inputs** (`microbench.json`): centroid anchors (mean, k-means) track softmax more closely than positional (stride), linear, or Performer.
+- **Fidelity on real activations** (`real_activation_fidelity.json`): on `Q/K/V` captured from pretrained encoders, anchor count is a real accuracy lever — `m=64` cuts relative error ~3× versus `m=1` and is the only piecewise config that beats Nyströmformer at `n=8192`, while `m=1` alone is insufficient there. Opposite to the single-cluster synthetic microbenchmark.
 - **Recall** (`recall.json`): the mean anchor solves the task (~0.995, 8 seeds); linear attention fails at chance.
 
 See the main [README](../README.md#results) for the full tables and honest scope (synthetic tasks, small models, MPS timing — not CUDA or real-data end-to-end).

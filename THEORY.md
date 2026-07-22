@@ -2,7 +2,7 @@
 
 ## Abstract
 
-This document presents the theoretical foundation for **piecewise-linear-attention**, a deterministic linear-time attention mechanism. By linearizing softmax attention with a first-order Taylor expansion around a small set of representative *anchor* queries, we reduce computational complexity from $O(n^2 \cdot d)$ to $O(n \cdot d^2)$ — the same class as linear attention, but tracking softmax far more closely because the expansion is exact *at* each anchor and its error grows only quadratically with the query-to-anchor distance. On synthetic benchmarks the mean-centroid variant approximates softmax markedly better than random-feature (Performer) and kernel (linear) attention, and it solves associative recall where linear attention fails; see the `results/` directory and the project README for the reproducible measurements and their operating points.
+This document presents the theoretical foundation for **piecewise-linear-attention**, a deterministic linear-time attention mechanism. By linearizing softmax attention with a first-order Taylor expansion around a small set of representative *anchor* queries, we reduce computational complexity from $O(n^2 \cdot d)$ to $O(n \cdot d^2)$ — the same class as linear attention, but tracking softmax far more closely because the expansion is exact *at* each anchor and its error grows only quadratically with the query-to-anchor distance. On synthetic benchmarks the mean-centroid variant approximates softmax markedly better than random-feature (Performer) and kernel (linear) attention, and it solves associative recall where linear attention fails; on real trained-model activations the same fidelity holds once the anchor count is raised (a single anchor is not sufficient at long context, but multi-anchor beats landmark baselines). See the `results/` directory and the project README for the reproducible measurements and their operating points.
 
 ---
 
@@ -149,9 +149,11 @@ $$A(q) \approx o + s\,(M\,\Delta q) - s\,o\,(\bar{k}^\top \Delta q).$$
 
 This is algebraically identical to $o + J_A(a)\,\Delta q$ but needs only the compact per-anchor factors $o, \bar{k}$ (each $\mathbb{R}^{d}$) and $M$ ($\mathbb{R}^{d\times d}$); no per-query $(d,d)$ tensor is ever formed. The apply is $O(m\cdot n\cdot d^2)$ and is what makes the method linear in $n$ in practice.
 
-### 4.6 Why the Mean Centroid Is the Recommended Anchor
+### 4.6 Why the Mean Centroid Is the Recommended Single Anchor
 
-Since the first-order error scales with $\|q-a\|^2$, the single anchor that minimizes the mean squared query-to-anchor distance $\frac{1}{n}\sum_i\|q_i-a\|^2$ is the **centroid** $a=\frac{1}{n}\sum_i q_i$ — this is the definition of the mean. Consequently the single mean anchor ($m=1$) is simultaneously the cheapest configuration (one anchor, trivial routing) and the most accurate first-order one. Positionally placed anchors (e.g. strided sequence positions) sit at the edges of the query cloud, incur larger $\|\Delta q\|$, and are measurably worse. Adding more centroid anchors (k-means) reduces $\mathbb{E}\|\Delta q\|^2$ further and can speed convergence on some tasks, at proportionally higher cost.
+Since the first-order error scales with $\|q-a\|^2$, the single anchor that minimizes the mean squared query-to-anchor distance $\frac{1}{n}\sum_i\|q_i-a\|^2$ is the **centroid** $a=\frac{1}{n}\sum_i q_i$ — this is the definition of the mean. Consequently the single mean anchor is *optimal within $m=1$*: it is both the cheapest configuration (one anchor, trivial routing) and the most accurate **single-anchor** first-order expansion. Positionally placed single anchors (e.g. a strided sequence position) sit off the query centroid, incur larger $\|\Delta q\|$, and are measurably worse.
+
+This optimality is *within* $m=1$, not across anchor counts. Adding more centroid anchors (k-means) partitions the query cloud and reduces $\mathbb{E}\|\Delta q\|^2$ strictly further, so $m>1$ is genuinely more accurate — not merely faster-converging. On synthetic inputs with a single tight query cluster the gain from $m>1$ is small (one centroid already covers the cloud), which is why the mean anchor nearly matches k-means there; but on real trained-model activations the query distribution is more spread out and fidelity keeps improving substantially with anchor count (relative error to softmax drops ~3× from $m=1$ to $m=64$; see the project README's real-activation fidelity measurements). The honest statement is therefore: the centroid is the best *placement* for a given anchor count, and anchor count is an accuracy/cost knob whose payoff depends on how concentrated the queries are.
 
 ---
 
@@ -266,16 +268,17 @@ We match linear attention complexity while maintaining better approximation qual
 ## 7. Open Questions and Future Directions
 
 **Settled by the current evidence** (see `results/` and the project issues):
-- *Anchor count vs. placement*: placement dominates — the single mean centroid is the most accurate first-order config; more anchors mainly affect convergence speed (§4.6).
+- *Anchor placement vs. count*: for a **fixed** anchor count, centroid placement is optimal (the mean is the best single anchor; k-means centroids beat strided positions). Anchor **count** is a separate lever: on synthetic single-cluster inputs $m=1$ nearly matches $m>1$, but on real trained-model activations fidelity improves substantially with count (relative error to softmax drops ~3× from $m=1$ to $m=64$), and $m=1$ alone is not competitive with landmark baselines at long context (§4.6). Count therefore affects both convergence speed and final approximation accuracy, with the payoff set by how concentrated the queries are.
 - *Higher-order terms*: an exact second-order term reduces error but has no linear-time ($O(n\cdot d)$) form, so it is not speed-compatible with the linear-time goal; low-rank/diagonal Jacobian approximations are refuted (the operators are full-rank).
 - *Deterministic vs. stochastic*: the deterministic linearization tracks softmax more closely than Performer's random features at matched compute, and is seed-free at inference.
 
 **Genuinely open**:
 1. **Real-data task quality**: language modeling, LRA, and ViT/BERT fine-tuning at realistic model sizes.
 2. **Long context and hardware**: CUDA kernels, realistic $d$ (64–128), and the $n\gg10^3$ regime where the linear-in-$n$ structure should dominate.
-3. **Anchor learning**: a learned query→anchor map (vs. mean/k-means) as a training-time bet.
-4. **Positioning**: head-to-head against landmark/Nyström-style low-rank attention, not only Performer/linear.
-5. **Reference-frame gradient**: whether detaching the centroid (stop-gradient anchor) improves training stability.
+3. **Reconciling accuracy and speed at higher anchor counts**: the accurate high-$m$ configuration is currently far slower than Performer because the apply is $O(m\cdot n\cdot d^2)$; whether the $d^2$ factor can be cut (e.g. structured Jacobian) while keeping the fidelity gain is the central efficiency question.
+4. **Anchor learning**: a learned query→anchor map (vs. mean/k-means) as a training-time bet.
+5. **Positioning**: head-to-head against landmark/Nyström-style low-rank attention, not only Performer/linear.
+6. **Reference-frame gradient**: whether detaching the centroid (stop-gradient anchor) improves training stability.
 
 ---
 
