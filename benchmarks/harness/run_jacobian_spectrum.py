@@ -120,7 +120,10 @@ def _rank_for_variance(singular_values, thresholds=VAR_THRESHOLDS):
     quantity that bounds the truncation error propagated through ``M_j``."""
     energy = singular_values.double() ** 2
     total = energy.sum().clamp_min(EPS)
-    cum = torch.cumsum(energy, dim=0) / total
+    # The cumulative curve is length <= d (tiny); do the search on CPU so this
+    # works regardless of the singular values' device (CUDA searchsorted needs
+    # both operands co-located).
+    cum = (torch.cumsum(energy, dim=0) / total).cpu()
     out = {}
     for th in thresholds:
         # Smallest r with cum[r-1] >= th; searchsorted on the cumulative curve.
