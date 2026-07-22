@@ -95,13 +95,52 @@ apply-speedup closed about half the `m=64` gap for free; the remainder is the
 kind of `d²`/tensor-core effect that CPU measurement penalizes most and a GPU
 measurement at `d=64–128` (with bf16) is expected to recover.
 
+### Cutting the `d²` factor: query-residual low rank is confirmed on real data
+
+The dominant remaining build cost is the per-anchor second-moment operator
+`M_j` — a full `d×d` matrix, so it carries a `d²` factor that dominates at the
+realistic per-head `d=128`. That operator is only ever consumed as `M_j·Δq`,
+where `Δq = q − a_j` is a query's offset from its anchor. Because anchors are
+cluster centroids, each cluster's `Δq` vectors should span only a few directions,
+so `M_j` need only be built on those `d' ≪ d` directions — replacing `d²` with
+`d·d'`.
+
+Whether `d'` is actually small is an empirical question about real activations,
+and it is now measured (per-cluster SVD of the `Δq` residuals, native `n=512`
+blocks, at three real per-head dimensions — MiniLM `d=32`, BERT-base `d=64`,
+GPT-Neo-1.3B `d=128`):
+
+| `d` | worst-anchor `d'@95%` (m=64) | median anchor |
+|---|---|---|
+| 32 | 0.50·d | 0.22·d |
+| 64 | 0.25–0.56·d | 0.12·d |
+| **128** | **0.20–0.30·d** | **0.07·d (≈13× fewer directions)** |
+
+Two trends make this the right lever: the required fraction of directions
+**shrinks as `d` grows** (so the reduced cost `d·d'` grows far slower than `d²`,
+exactly opposite the cost trend), and **shrinks as `m` grows** (tighter clusters →
+smaller `Δq` subspace), strongest in the accurate `m=64` regime. The key/operator
+side stays broad on real data (the broadest anchor's softmax nucleus is ~0.99 of
+all keys at `d=128`), so key-side low-rank compression is *not* viable — the win
+is specifically on the query-residual axis. This greenlights building a
+per-anchor **ragged-`d'`** reduced operator (each anchor keeps its own `d'`,
+capturing the ~13× median; a shared basis is a ~3× conservative fallback). It is
+pure stock PyTorch, so it preserves the fair-baseline framing. **Caveat:** this
+establishes the rank *structure* only — whether the reduced FLOPs convert to a
+measured wall-clock win (and preserve `rel-err ≤ 0.24`) is the next test. Measured
+on an A100 (not H100); the structural verdict is hardware-independent, the eventual
+timing needs H100 confirmation. See issue #9 and
+`results/jacobian_spectrum_gpu_d128.json`.
+
 ## What is not yet established
 
 - GPU speed–accuracy Pareto at realistic per-head `d` (64–128) across
   `n∈{1k…16k}`, fp32 and bf16, forward and forward+backward — the existential
   gate for the efficiency framing.
-- Whether the `d²` factor can be cut (structured / low-rank / diagonal Jacobian)
-  while keeping the high-`m` fidelity gain.
+- Whether the confirmed query-residual low rank converts into a **measured
+  wall-clock** build speedup at `m=64` while keeping `rel-err ≤ 0.24` (the rank
+  *structure* is established above; the realized reduced build is not yet
+  implemented or timed).
 - Whether a per-anchor (ragged) build cap — scaling with the mean nucleus rather
   than the worst-anchor max — converts its `~1.5–2.5×` build FLOP ceiling into a
   measured wall-clock win on GPU (the batched-cap version does not; the median
