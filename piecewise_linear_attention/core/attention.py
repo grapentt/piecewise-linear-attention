@@ -529,22 +529,30 @@ class PiecewiseAttention(BaseAttention):
         ``out_i = A(a_{j(i)}) + J(a_{j(i)}) @ (q_i - a_{j(i)})`` where ``j(i)`` is
         the index of the anchor closest to query ``i``.
 
-        The expansion is applied in a fused form that never materializes a
-        per-query ``(batch, seq_len, dim, dim)`` Jacobian. Distributing the
-        matmul over the rank-1 Jacobian gives, for a query linearized around
-        anchor ``j`` (``o_j`` = anchor output, ``wk_j`` = weighted keys,
-        ``M_j = Σ_n α_{jn} v_n k_nᵀ``, ``Δq = q - a_j``):
+        The expansion distributes the matmul over the rank-1 Jacobian: for a
+        query linearized around anchor ``j`` (``o_j`` = anchor output,
+        ``wk_j`` = weighted keys, ``M_j = Σ_n α_{jn} v_n k_nᵀ``, ``Δq = q - a_j``):
 
             out = o_j + scale·(M_j @ Δq) − scale·o_j·(wk_jᵀ Δq),
 
-        which is algebraically identical to ``o_j + J_j @ Δq`` but needs only the
-        compact per-anchor factors ``o_j, wk_j`` (batch, m, dim) and ``M_j``
-        (batch, m, dim, dim). The expansion of every query around every anchor is
-        formed as a dense ``(batch, m, seq_len, dim)`` tensor and the assigned
-        slice is selected along the small anchor axis ``m``. This is
-        ``O(batch · m · seq_len · dim²)`` — with the constant ``m`` (typically
-        2–8) it is genuinely linear in ``seq_len``, unlike a ``O(seq_len²·dim)``
-        softmax, and avoids the large per-query Jacobian gather.
+        which is algebraically identical to ``o_j + J_j @ Δq``.
+
+        The second-moment operator ``M`` is kept **compact** at ``(batch, m, dim,
+        dim)`` and is *never* gathered to a per-query ``(batch, seq_len, dim,
+        dim)`` tensor (that gather is a memory cliff — ≈2 GB at ``batch=64,
+        seq_len=2048, dim=64`` — whose bandwidth, not FLOPs, dominates the apply).
+        Instead queries are **grouped by their assigned anchor** and each group is
+        applied with a single batched matmul against the compact ``M``: each
+        query's ``Δq`` is scattered into a fixed-capacity bucket ``(batch, m, C,
+        dim)`` (``C`` = the largest group size), one matmul computes ``M_j @ Δq``
+        for every query at once, and the results are gathered back. The apply is
+        then ``O(batch · seq_len · dim²)`` and never materializes a per-query
+        ``(dim, dim)`` object. When the assignment is badly skewed (``C`` far
+        larger than the balanced ``seq_len / m``, e.g. a degenerate single-cluster
+        input) the bucket would itself grow toward ``(batch, m, seq_len, dim)``, so
+        a guard falls back to a direct per-query matmul against the gathered
+        compact ``M`` — correct and still free of the ``(d, d)`` gather, just
+        without the batched-group speedup.
 
         Args:
             Q: Query tensor of shape (batch, seq_len, dim).
@@ -555,17 +563,22 @@ class PiecewiseAttention(BaseAttention):
         Returns:
             output: Attention output of shape (batch, seq_len, dim).
         """
-        _, _, dim = Q.shape
+        b, n, dim = Q.shape
+        m = anchors.shape[1]
         scale_factor = 1.0 / math.sqrt(dim) if self.scale else 1.0
 
         # Exact softmax attention output and the compact analytic-Jacobian
-        # factors at each anchor. All are (batch, m, *) — no per-query (d, d)
-        # tensor is ever formed.
+        # factors at each anchor. All are (batch, m, *) except the second-moment
+        # operator M, which is only ever (batch, m, dim, dim) — no per-query
+        # (dim, dim) tensor is ever formed.
         scores = torch.einsum("bmd,bnd->bmn", anchors, K) * scale_factor
         alpha = torch.softmax(scores, dim=-1)  # (batch, m, seq_len)
         out_anchor = torch.einsum("bmn,bnd->bmd", alpha, V)  # (batch, m, dim)
         weighted_k = torch.einsum("bmn,bnd->bmd", alpha, K)  # (batch, m, dim)
-        weighted_outer = torch.einsum("bmn,bnd,bne->bmde", alpha, V, K)  # (b,m,d,d)
+        # M_j = Σ_n α_{jn} v_n k_nᵀ, built as a batched matmul (slightly faster
+        # than the "bmn,bnd,bne->bmde" einsum) — compact (batch, m, dim, dim).
+        weighted_v = alpha.unsqueeze(-1) * V.unsqueeze(1)  # (batch, m, seq_len, dim)
+        second_moment = weighted_v.transpose(-1, -2) @ K.unsqueeze(1)  # (b, m, d, d)
 
         # Hard-assign each query to its nearest anchor (non-differentiable);
         # gradients still flow through the expansion below w.r.t. Q, K, V.
@@ -575,21 +588,54 @@ class PiecewiseAttention(BaseAttention):
         with torch.no_grad():
             assign = torch.cdist(Q.float(), anchors.float()).argmin(dim=-1)  # (batch, seq_len)
 
-        # Fused first-order expansion of every query around every anchor.
-        # delta_all[b, j, i] = q_i - a_j.
-        delta_all = Q.unsqueeze(1) - anchors.unsqueeze(2)  # (batch, m, seq_len, dim)
-        # M_j @ Δq for all anchors/queries.
-        m_term = torch.einsum("bmde,bmne->bmnd", weighted_outer, delta_all)  # (b,m,n,d)
-        # Rank-1 term o_j·(wk_jᵀ Δq) without forming any (d, d) product.
-        wk_dot = torch.einsum("bmd,bmnd->bmn", weighted_k, delta_all)  # (b,m,n)
-        rank1 = out_anchor.unsqueeze(2) * wk_dot.unsqueeze(-1)  # (b,m,n,d)
-        expanded = out_anchor.unsqueeze(2) + scale_factor * (m_term - rank1)  # (b,m,n,d)
+        # Gather the m-free per-query factors along the anchor axis (cheap
+        # O(seq_len · dim) gathers, never a (dim, dim) per-query object).
+        idx_d = assign.unsqueeze(-1).expand(-1, -1, dim)  # (batch, seq_len, dim)
+        a_sel = torch.gather(anchors, 1, idx_d)  # (batch, seq_len, dim)
+        o_sel = torch.gather(out_anchor, 1, idx_d)  # (batch, seq_len, dim)
+        wk_sel = torch.gather(weighted_k, 1, idx_d)  # (batch, seq_len, dim)
+        delta = Q - a_sel  # (batch, seq_len, dim)
 
-        # Select each query's assigned-anchor slice along the anchor axis m.
-        # This is a cheap O(seq_len·dim) gather, not the O(seq_len·dim²) gather
-        # of a full per-query Jacobian.
-        idx = assign.unsqueeze(1).unsqueeze(-1).expand(-1, 1, -1, dim)  # (b,1,n,d)
-        return torch.gather(expanded, 1, idx).squeeze(1)  # (batch, seq_len, dim)
+        # Group-by-anchor apply of M_j @ Δq. Route each query's Δq into a
+        # fixed-capacity bucket keyed by ``flat = assign · C + within-group-slot``
+        # so all queries sharing an anchor are applied with ONE batched matmul
+        # against the compact M.
+        with torch.no_grad():
+            onehot = torch.zeros(b, n, m, device=Q.device, dtype=Q.dtype)
+            onehot.scatter_(2, assign.unsqueeze(-1), 1.0)
+            capacity = int(onehot.sum(dim=1).max().item())  # C = largest group size
+            # Running position of each query within its anchor's group.
+            pos = (onehot.cumsum(dim=1) - 1).gather(2, assign.unsqueeze(-1)).squeeze(-1)
+            flat = (assign * capacity + pos.long()).long()  # (batch, seq_len) into m·C
+
+        # Skew guard: the grouped bucket has shape (batch, m·C, dim); its memory
+        # and padding work grow with the largest group size C. Only when the
+        # bucket would exceed the size of the direct-gather fallback's per-query
+        # (batch, seq_len, dim, dim) operator — i.e. m·C > seq_len·dim, reached
+        # only under a pathologically imbalanced assignment where C approaches
+        # seq_len (e.g. a degenerate single-cluster input) — is it worth falling
+        # back to a direct per-query matmul against the gathered compact M. That
+        # fallback still avoids forming any per-query (dim, dim) object from
+        # scratch; it only forgoes the batched-group speedup. For ordinary
+        # (even 10×-imbalanced) k-means/stride assignments the bucket path wins,
+        # so the guard stays inactive.
+        if m * capacity > n * dim:
+            m_sel = torch.gather(
+                second_moment, 1, assign.view(b, n, 1, 1).expand(-1, -1, dim, dim)
+            )  # (batch, seq_len, dim, dim)
+            m_term = torch.einsum("bnde,bne->bnd", m_sel, delta)  # (batch, seq_len, dim)
+        else:
+            flat_d = flat.unsqueeze(-1).expand(-1, -1, dim)  # (batch, seq_len, dim)
+            bucket = torch.zeros(b, m * capacity, dim, device=Q.device, dtype=Q.dtype)
+            bucket.scatter_(1, flat_d, delta)  # place each Δq into its group slot
+            # dq @ Mᵀ computes (M @ dq) row-wise, so transpose the last two dims.
+            res = torch.matmul(bucket.view(b, m, capacity, dim), second_moment.transpose(-1, -2))
+            res = res.reshape(b, m * capacity, dim)
+            m_term = res.gather(1, flat_d)  # (batch, seq_len, dim): M_{assign_i} @ Δq_i
+
+        # Rank-1 term o_j·(wk_jᵀ Δq) without forming any (dim, dim) product.
+        wk_dot = torch.einsum("bnd,bnd->bn", wk_sel, delta)  # (batch, seq_len)
+        return o_sel + scale_factor * (m_term - o_sel * wk_dot.unsqueeze(-1))
 
     def forward(
         self,
