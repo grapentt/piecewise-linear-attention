@@ -1,0 +1,162 @@
+{
+  "config": {
+    "benchmark": "microbench",
+    "dim": 64,
+    "dispersions": [
+      0.1,
+      0.5,
+      1.0,
+      2.0
+    ],
+    "lengths": [
+      32,
+      64,
+      128
+    ],
+    "num_anchors": 4,
+    "trials": 5
+  },
+  "environment": {
+    "device": "mps",
+    "platform": "macOS-26.5.1-arm64-arm-64bit",
+    "torch": "2.10.0"
+  },
+  "history": {
+    "grid": [
+      {
+        "dispersion": 0.1,
+        "rel_err": {
+          "linear_elu": 0.7093564033508301,
+          "performer": 1.7605663061141967,
+          "piecewise_kmeans": 0.004600834846496582,
+          "piecewise_mean": 0.005359281692653895,
+          "piecewise_stride": 0.008984816819429397
+        },
+        "seq_len": 32
+      },
+      {
+        "dispersion": 0.5,
+        "rel_err": {
+          "linear_elu": 0.7553198456764221,
+          "performer": 1.683508563041687,
+          "piecewise_kmeans": 0.10324595272541046,
+          "piecewise_mean": 0.11971665918827057,
+          "piecewise_stride": 0.2030154585838318
+        },
+        "seq_len": 32
+      },
+      {
+        "dispersion": 1.0,
+        "rel_err": {
+          "linear_elu": 0.8359345197677612,
+          "performer": 1.5085756301879882,
+          "piecewise_kmeans": 0.3206960320472717,
+          "piecewise_mean": 0.36612128019332885,
+          "piecewise_stride": 0.6038079142570496
+        },
+        "seq_len": 32
+      },
+      {
+        "dispersion": 2.0,
+        "rel_err": {
+          "linear_elu": 0.9222328543663025,
+          "performer": 1.21886465549469,
+          "piecewise_kmeans": 0.7045111060142517,
+          "piecewise_mean": 0.7678338766098023,
+          "piecewise_stride": 1.2119219064712525
+        },
+        "seq_len": 32
+      },
+      {
+        "dispersion": 0.1,
+        "rel_err": {
+          "linear_elu": 0.7503063559532166,
+          "performer": 1.865023684501648,
+          "piecewise_kmeans": 0.005491551291197538,
+          "piecewise_mean": 0.005966153275221586,
+          "piecewise_stride": 0.009755155444145203
+        },
+        "seq_len": 64
+      },
+      {
+        "dispersion": 0.5,
+        "rel_err": {
+          "linear_elu": 0.7934458494186402,
+          "performer": 1.7968717336654663,
+          "piecewise_kmeans": 0.12408263236284256,
+          "piecewise_mean": 0.13439349532127381,
+          "piecewise_stride": 0.22197176814079284
+        },
+        "seq_len": 64
+      },
+      {
+        "dispersion": 1.0,
+        "rel_err": {
+          "linear_elu": 0.8705473065376281,
+          "performer": 1.6378639221191407,
+          "piecewise_kmeans": 0.3753617465496063,
+          "piecewise_mean": 0.40190171599388125,
+          "piecewise_stride": 0.6812904000282287
+        },
+        "seq_len": 64
+      },
+      {
+        "dispersion": 2.0,
+        "rel_err": {
+          "linear_elu": 0.947535514831543,
+          "performer": 1.2776150941848754,
+          "piecewise_kmeans": 0.768600332736969,
+          "piecewise_mean": 0.7876007437705994,
+          "piecewise_stride": 1.3539359331130982
+        },
+        "seq_len": 64
+      },
+      {
+        "dispersion": 0.1,
+        "rel_err": {
+          "linear_elu": 0.7755368471145629,
+          "performer": 2.2174267530441285,
+          "piecewise_kmeans": 0.0061855059117078785,
+          "piecewise_mean": 0.006523884460330009,
+          "piecewise_stride": 0.010797686502337455
+        },
+        "seq_len": 128
+      },
+      {
+        "dispersion": 0.5,
+        "rel_err": {
+          "linear_elu": 0.8191128015518189,
+          "performer": 2.165526866912842,
+          "piecewise_kmeans": 0.13908988535404204,
+          "piecewise_mean": 0.14630565345287322,
+          "piecewise_stride": 0.24440484642982482
+        },
+        "seq_len": 128
+      },
+      {
+        "dispersion": 1.0,
+        "rel_err": {
+          "linear_elu": 0.8956508755683898,
+          "performer": 1.892162799835205,
+          "piecewise_kmeans": 0.41686736345291137,
+          "piecewise_mean": 0.4349667072296143,
+          "piecewise_stride": 0.7483943343162537
+        },
+        "seq_len": 128
+      },
+      {
+        "dispersion": 2.0,
+        "rel_err": {
+          "linear_elu": 0.9658040761947632,
+          "performer": 1.3345985889434815,
+          "piecewise_kmeans": 0.7997250556945801,
+          "piecewise_mean": 0.81130131483078,
+          "piecewise_stride": 1.471340584754944
+        },
+        "seq_len": 128
+      }
+    ]
+  },
+  "metrics": {},
+  "schema_version": 1
+}

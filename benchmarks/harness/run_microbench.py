@@ -31,7 +31,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import torch
 
-from piecewise_linear_attention.core.anchors import KMeansAnchor
+from piecewise_linear_attention.core.anchors import KMeansAnchor, StrideAnchor
 from piecewise_linear_attention.core.attention import (
     LinearAttention,
     PerformerAttention,
@@ -43,13 +43,23 @@ from piecewise_linear_attention.harness.results import ExperimentResult, save_re
 
 
 def _build_methods(dim, num_anchors):
-    """Return name -> attention module (all non-causal)."""
+    """Return name -> attention module (all non-causal).
+
+    The two piecewise variants isolate the effect of *anchor placement* at a
+    matched anchor count: ``piecewise_kmeans`` centres anchors on query clusters
+    (minimizing the mean squared query-to-anchor distance that drives first-order
+    truncation error), while ``piecewise_stride`` places them at fixed sequence
+    positions. ``piecewise_mean`` is the single mean-centroid anchor.
+    """
     return {
         "linear_elu": LinearAttention(dim=dim, kernel_type="elu"),
         "performer": PerformerAttention(dim=dim, seed=0),
         "piecewise_mean": PiecewiseAttention(dim=dim, scale=True),
         "piecewise_kmeans": PiecewiseAttention(
             dim=dim, scale=True, anchor_strategy=KMeansAnchor(k=num_anchors, iters=3)
+        ),
+        "piecewise_stride": PiecewiseAttention(
+            dim=dim, scale=True, anchor_strategy=StrideAnchor(k=num_anchors)
         ),
     }
 

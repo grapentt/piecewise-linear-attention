@@ -55,11 +55,13 @@ class TestEvidenceCLISmoke:
         """run_scaling --smoke completes and writes a well-formed result.
 
         Locks: the wall-clock scaling pipeline (build_attention -> timed forward
-        -> result schema). Catches a break in the timing loop, the device-sync
-        helper, or result serialization.
+        -> result schema), including the ``speedup_vs_performer`` head-to-head
+        metric. Catches a break in the timing loop, the device-sync helper, the
+        speedup computation, or result serialization.
         """
         module = _load("_run_scaling_cli", "run_scaling.py")
         out = tmp_path / "scaling.json"
         result = module.main(["--smoke", "--out", str(out)])
         assert out.exists()
         assert result.history["grid"], "no measurements recorded"
+        assert result.metrics["speedup_vs_performer"], "no performer speedup recorded"

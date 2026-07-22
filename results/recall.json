@@ -1,0 +1,3919 @@
+{
+  "config": {
+    "benchmark": "recall",
+    "lengths": [
+      64
+    ],
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ]
+  },
+  "environment": {
+    "device": "mps",
+    "platform": "macOS-26.5.1-arm64-arm-64bit",
+    "torch": "2.10.0"
+  },
+  "history": {
+    "runs": [
+      {
+        "config": {
+          "attention_kwargs": {},
+          "attention_type": "standard",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "0f85712",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "standard-n64-s0",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 0,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 1.0,
+          "curve": [
+            {
+              "accuracy": 0.11796875,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.12890625,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.12734375,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.13125,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.91328125,
+              "step": 5000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 6000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 7000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 8000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 9000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 10000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 11000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 12000
+            }
+          ],
+          "loss": 7.852879207348451e-06,
+          "params": 158608,
+          "train_time_s": 69.66911291587166
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {},
+          "attention_type": "standard",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "0f85712",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "standard-n64-s1",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 1,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 1.0,
+          "curve": [
+            {
+              "accuracy": 0.11953125,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.11328125,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.1171875,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.13515625,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.67421875,
+              "step": 5000
+            },
+            {
+              "accuracy": 0.9984375,
+              "step": 6000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 7000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 8000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 9000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 10000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 11000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 12000
+            }
+          ],
+          "loss": 1.4691966498503461e-05,
+          "params": 158608,
+          "train_time_s": 68.41054570907727
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {},
+          "attention_type": "standard",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "0f85712",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "standard-n64-s2",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 2,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 1.0,
+          "curve": [
+            {
+              "accuracy": 0.12890625,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.12109375,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.1203125,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.1421875,
+              "step": 4000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 5000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 6000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 7000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 8000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 9000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 10000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 11000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 12000
+            }
+          ],
+          "loss": 4.7478706619585864e-06,
+          "params": 158608,
+          "train_time_s": 68.86465900018811
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {},
+          "attention_type": "standard",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "0f85712",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "standard-n64-s3",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 3,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 1.0,
+          "curve": [
+            {
+              "accuracy": 0.12890625,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.1265625,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.13828125,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.159375,
+              "step": 4000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 5000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 6000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 7000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 8000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 9000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 10000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 11000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 12000
+            }
+          ],
+          "loss": 4.854040525970049e-06,
+          "params": 158608,
+          "train_time_s": 66.46931387484074
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {},
+          "attention_type": "standard",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "0f85712",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "standard-n64-s4",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 4,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 1.0,
+          "curve": [
+            {
+              "accuracy": 0.1328125,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.1359375,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.1171875,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.1359375,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.6609375,
+              "step": 5000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 6000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 7000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 8000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 9000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 10000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 11000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 12000
+            }
+          ],
+          "loss": 1.0380446838098578e-05,
+          "params": 158608,
+          "train_time_s": 68.26504945894703
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {},
+          "attention_type": "standard",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "0f85712",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "standard-n64-s5",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 5,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 1.0,
+          "curve": [
+            {
+              "accuracy": 0.12109375,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.121875,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.13828125,
+              "step": 3000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 4000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 5000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 6000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 7000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 8000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 9000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 10000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 11000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 12000
+            }
+          ],
+          "loss": 3.4887275432993192e-06,
+          "params": 158608,
+          "train_time_s": 67.93814058299176
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {},
+          "attention_type": "standard",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "0f85712",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "standard-n64-s6",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 6,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 1.0,
+          "curve": [
+            {
+              "accuracy": 0.12421875,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.11015625,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.13515625,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.12890625,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.884375,
+              "step": 5000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 6000
+            },
+            {
+              "accuracy": 0.996875,
+              "step": 7000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 8000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 9000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 10000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 11000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 12000
+            }
+          ],
+          "loss": 2.2070145860197954e-05,
+          "params": 158608,
+          "train_time_s": 66.8499474588316
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {},
+          "attention_type": "standard",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "0f85712",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "standard-n64-s7",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 7,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 1.0,
+          "curve": [
+            {
+              "accuracy": 0.128125,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.1078125,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.1078125,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.13125,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.13046875,
+              "step": 5000
+            },
+            {
+              "accuracy": 0.99609375,
+              "step": 6000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 7000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 8000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 9000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 10000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 11000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 12000
+            }
+          ],
+          "loss": 1.3222816050983965e-05,
+          "params": 158608,
+          "train_time_s": 66.73946337494999
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {
+            "kernel_type": "elu"
+          },
+          "attention_type": "linear",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "0f85712",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "linear-n64-s0",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 0,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 0.11484375,
+          "curve": [
+            {
+              "accuracy": 0.11640625,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.13125,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.125,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.128125,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.125,
+              "step": 5000
+            },
+            {
+              "accuracy": 0.12734375,
+              "step": 6000
+            },
+            {
+              "accuracy": 0.1296875,
+              "step": 7000
+            },
+            {
+              "accuracy": 0.134375,
+              "step": 8000
+            },
+            {
+              "accuracy": 0.12109375,
+              "step": 9000
+            },
+            {
+              "accuracy": 0.134375,
+              "step": 10000
+            },
+            {
+              "accuracy": 0.1359375,
+              "step": 11000
+            },
+            {
+              "accuracy": 0.11484375,
+              "step": 12000
+            }
+          ],
+          "loss": 2.577643394470215,
+          "params": 158608,
+          "train_time_s": 69.49286825000308
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {
+            "kernel_type": "elu"
+          },
+          "attention_type": "linear",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "0f85712",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "linear-n64-s1",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 1,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 0.1328125,
+          "curve": [
+            {
+              "accuracy": 0.121875,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.115625,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.1234375,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.1296875,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.125,
+              "step": 5000
+            },
+            {
+              "accuracy": 0.12265625,
+              "step": 6000
+            },
+            {
+              "accuracy": 0.12734375,
+              "step": 7000
+            },
+            {
+              "accuracy": 0.1140625,
+              "step": 8000
+            },
+            {
+              "accuracy": 0.13203125,
+              "step": 9000
+            },
+            {
+              "accuracy": 0.1140625,
+              "step": 10000
+            },
+            {
+              "accuracy": 0.1125,
+              "step": 11000
+            },
+            {
+              "accuracy": 0.1328125,
+              "step": 12000
+            }
+          ],
+          "loss": 2.5332212448120117,
+          "params": 158608,
+          "train_time_s": 69.06155979097821
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {
+            "kernel_type": "elu"
+          },
+          "attention_type": "linear",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "0f85712",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "linear-n64-s2",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 2,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 0.11875,
+          "curve": [
+            {
+              "accuracy": 0.121875,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.11796875,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.11015625,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.13671875,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.13125,
+              "step": 5000
+            },
+            {
+              "accuracy": 0.1234375,
+              "step": 6000
+            },
+            {
+              "accuracy": 0.13046875,
+              "step": 7000
+            },
+            {
+              "accuracy": 0.121875,
+              "step": 8000
+            },
+            {
+              "accuracy": 0.13515625,
+              "step": 9000
+            },
+            {
+              "accuracy": 0.1421875,
+              "step": 10000
+            },
+            {
+              "accuracy": 0.128125,
+              "step": 11000
+            },
+            {
+              "accuracy": 0.11875,
+              "step": 12000
+            }
+          ],
+          "loss": 2.4900968074798584,
+          "params": 158608,
+          "train_time_s": 68.1265318330843
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {
+            "kernel_type": "elu"
+          },
+          "attention_type": "linear",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "0f85712",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "linear-n64-s3",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 3,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 0.12109375,
+          "curve": [
+            {
+              "accuracy": 0.12578125,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.125,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.1375,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.13359375,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.14140625,
+              "step": 5000
+            },
+            {
+              "accuracy": 0.11875,
+              "step": 6000
+            },
+            {
+              "accuracy": 0.128125,
+              "step": 7000
+            },
+            {
+              "accuracy": 0.109375,
+              "step": 8000
+            },
+            {
+              "accuracy": 0.1359375,
+              "step": 9000
+            },
+            {
+              "accuracy": 0.121875,
+              "step": 10000
+            },
+            {
+              "accuracy": 0.13203125,
+              "step": 11000
+            },
+            {
+              "accuracy": 0.12109375,
+              "step": 12000
+            }
+          ],
+          "loss": 2.680614948272705,
+          "params": 158608,
+          "train_time_s": 69.56362350005656
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {
+            "kernel_type": "elu"
+          },
+          "attention_type": "linear",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "0f85712",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "linear-n64-s4",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 4,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 0.1375,
+          "curve": [
+            {
+              "accuracy": 0.134375,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.1359375,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.12109375,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.1375,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.1421875,
+              "step": 5000
+            },
+            {
+              "accuracy": 0.1421875,
+              "step": 6000
+            },
+            {
+              "accuracy": 0.1390625,
+              "step": 7000
+            },
+            {
+              "accuracy": 0.13671875,
+              "step": 8000
+            },
+            {
+              "accuracy": 0.11640625,
+              "step": 9000
+            },
+            {
+              "accuracy": 0.12109375,
+              "step": 10000
+            },
+            {
+              "accuracy": 0.12734375,
+              "step": 11000
+            },
+            {
+              "accuracy": 0.1375,
+              "step": 12000
+            }
+          ],
+          "loss": 2.6046829223632812,
+          "params": 158608,
+          "train_time_s": 66.40988399996422
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {
+            "kernel_type": "elu"
+          },
+          "attention_type": "linear",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "0f85712",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "linear-n64-s5",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 5,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 0.13359375,
+          "curve": [
+            {
+              "accuracy": 0.11640625,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.121875,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.1359375,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.1328125,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.12265625,
+              "step": 5000
+            },
+            {
+              "accuracy": 0.13046875,
+              "step": 6000
+            },
+            {
+              "accuracy": 0.134375,
+              "step": 7000
+            },
+            {
+              "accuracy": 0.13359375,
+              "step": 8000
+            },
+            {
+              "accuracy": 0.121875,
+              "step": 9000
+            },
+            {
+              "accuracy": 0.11953125,
+              "step": 10000
+            },
+            {
+              "accuracy": 0.1296875,
+              "step": 11000
+            },
+            {
+              "accuracy": 0.13359375,
+              "step": 12000
+            }
+          ],
+          "loss": 2.5251450538635254,
+          "params": 158608,
+          "train_time_s": 67.89315991615877
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {
+            "kernel_type": "elu"
+          },
+          "attention_type": "linear",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "0f85712",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "linear-n64-s6",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 6,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 0.12578125,
+          "curve": [
+            {
+              "accuracy": 0.12578125,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.12109375,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.134375,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.1328125,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.13125,
+              "step": 5000
+            },
+            {
+              "accuracy": 0.14140625,
+              "step": 6000
+            },
+            {
+              "accuracy": 0.121875,
+              "step": 7000
+            },
+            {
+              "accuracy": 0.12265625,
+              "step": 8000
+            },
+            {
+              "accuracy": 0.1265625,
+              "step": 9000
+            },
+            {
+              "accuracy": 0.1265625,
+              "step": 10000
+            },
+            {
+              "accuracy": 0.11328125,
+              "step": 11000
+            },
+            {
+              "accuracy": 0.12578125,
+              "step": 12000
+            }
+          ],
+          "loss": 2.583026170730591,
+          "params": 158608,
+          "train_time_s": 67.4691207499709
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {
+            "kernel_type": "elu"
+          },
+          "attention_type": "linear",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "0f85712",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "linear-n64-s7",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 7,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 0.125,
+          "curve": [
+            {
+              "accuracy": 0.1328125,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.115625,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.109375,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.12890625,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.13046875,
+              "step": 5000
+            },
+            {
+              "accuracy": 0.13984375,
+              "step": 6000
+            },
+            {
+              "accuracy": 0.1296875,
+              "step": 7000
+            },
+            {
+              "accuracy": 0.1328125,
+              "step": 8000
+            },
+            {
+              "accuracy": 0.125,
+              "step": 9000
+            },
+            {
+              "accuracy": 0.121875,
+              "step": 10000
+            },
+            {
+              "accuracy": 0.125,
+              "step": 11000
+            },
+            {
+              "accuracy": 0.125,
+              "step": 12000
+            }
+          ],
+          "loss": 2.510694742202759,
+          "params": 158608,
+          "train_time_s": 66.03917795792222
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {},
+          "attention_type": "performer",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "0f85712",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "performer-n64-s0",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 0,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 1.0,
+          "curve": [
+            {
+              "accuracy": 0.1125,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.13203125,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.8890625,
+              "step": 3000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.99921875,
+              "step": 5000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 6000
+            },
+            {
+              "accuracy": 0.996875,
+              "step": 7000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 8000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 9000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 10000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 11000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 12000
+            }
+          ],
+          "loss": 1.5532241377513856e-05,
+          "params": 158608,
+          "train_time_s": 94.56270787515678
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {},
+          "attention_type": "performer",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "0f85712",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "performer-n64-s1",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 1,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 1.0,
+          "curve": [
+            {
+              "accuracy": 0.1234375,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.11171875,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.8453125,
+              "step": 3000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 4000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 5000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 6000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 7000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 8000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 9000
+            },
+            {
+              "accuracy": 0.9984375,
+              "step": 10000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 11000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 12000
+            }
+          ],
+          "loss": 2.3485041310777888e-05,
+          "params": 158608,
+          "train_time_s": 95.27209187508561
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {},
+          "attention_type": "performer",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "0f85712",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "performer-n64-s2",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 2,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 0.99453125,
+          "curve": [
+            {
+              "accuracy": 0.12578125,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.3390625,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.55703125,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.6890625,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.86640625,
+              "step": 5000
+            },
+            {
+              "accuracy": 0.91796875,
+              "step": 6000
+            },
+            {
+              "accuracy": 0.975,
+              "step": 7000
+            },
+            {
+              "accuracy": 0.9953125,
+              "step": 8000
+            },
+            {
+              "accuracy": 0.99921875,
+              "step": 9000
+            },
+            {
+              "accuracy": 0.99921875,
+              "step": 10000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 11000
+            },
+            {
+              "accuracy": 0.99453125,
+              "step": 12000
+            }
+          ],
+          "loss": 0.0010224771685898304,
+          "params": 158608,
+          "train_time_s": 94.8430636250414
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {},
+          "attention_type": "performer",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "0f85712",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "performer-n64-s3",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 3,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 0.84921875,
+          "curve": [
+            {
+              "accuracy": 0.12578125,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.1171875,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.6078125,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.8234375,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.84921875,
+              "step": 5000
+            },
+            {
+              "accuracy": 0.8515625,
+              "step": 6000
+            },
+            {
+              "accuracy": 0.85078125,
+              "step": 7000
+            },
+            {
+              "accuracy": 0.8578125,
+              "step": 8000
+            },
+            {
+              "accuracy": 0.84921875,
+              "step": 9000
+            },
+            {
+              "accuracy": 0.853125,
+              "step": 10000
+            },
+            {
+              "accuracy": 0.8546875,
+              "step": 11000
+            },
+            {
+              "accuracy": 0.84921875,
+              "step": 12000
+            }
+          ],
+          "loss": 0.6329870223999023,
+          "params": 158608,
+          "train_time_s": 94.57726770802401
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {},
+          "attention_type": "performer",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "0f85712",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "performer-n64-s4",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 4,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 1.0,
+          "curve": [
+            {
+              "accuracy": 0.128125,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.5,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.63984375,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.996875,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.9984375,
+              "step": 5000
+            },
+            {
+              "accuracy": 0.996875,
+              "step": 6000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 7000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 8000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 9000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 10000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 11000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 12000
+            }
+          ],
+          "loss": 2.5533036023261957e-05,
+          "params": 158608,
+          "train_time_s": 95.5603739998769
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {},
+          "attention_type": "performer",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "0f85712",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "performer-n64-s5",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 5,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 1.0,
+          "curve": [
+            {
+              "accuracy": 0.1265625,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.80546875,
+              "step": 2000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 3000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 4000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 5000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 6000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 7000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 8000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 9000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 10000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 11000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 12000
+            }
+          ],
+          "loss": 1.152966342488071e-05,
+          "params": 158608,
+          "train_time_s": 94.72831341600977
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {},
+          "attention_type": "performer",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "0f85712",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "performer-n64-s6",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 6,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 1.0,
+          "curve": [
+            {
+              "accuracy": 0.1234375,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.11640625,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.53984375,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.6671875,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.85625,
+              "step": 5000
+            },
+            {
+              "accuracy": 0.99765625,
+              "step": 6000
+            },
+            {
+              "accuracy": 0.996875,
+              "step": 7000
+            },
+            {
+              "accuracy": 0.9921875,
+              "step": 8000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 9000
+            },
+            {
+              "accuracy": 0.99921875,
+              "step": 10000
+            },
+            {
+              "accuracy": 0.99921875,
+              "step": 11000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 12000
+            }
+          ],
+          "loss": 3.6978588468628004e-05,
+          "params": 158608,
+          "train_time_s": 95.11486800014973
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {},
+          "attention_type": "performer",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "0f85712",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "performer-n64-s7",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 7,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 1.0,
+          "curve": [
+            {
+              "accuracy": 0.10546875,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.11171875,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.7703125,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.92734375,
+              "step": 4000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 5000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 6000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 7000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 8000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 9000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 10000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 11000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 12000
+            }
+          ],
+          "loss": 5.261953447188716e-06,
+          "params": 158608,
+          "train_time_s": 94.45021004206501
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {},
+          "attention_type": "piecewise",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "0f85712",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "piecewise-n64-s0",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 0,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 0.99921875,
+          "curve": [
+            {
+              "accuracy": 0.12265625,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.13046875,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.12109375,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.1265625,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.12421875,
+              "step": 5000
+            },
+            {
+              "accuracy": 0.13515625,
+              "step": 6000
+            },
+            {
+              "accuracy": 0.1890625,
+              "step": 7000
+            },
+            {
+              "accuracy": 0.228125,
+              "step": 8000
+            },
+            {
+              "accuracy": 0.83984375,
+              "step": 9000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 10000
+            },
+            {
+              "accuracy": 0.99921875,
+              "step": 11000
+            },
+            {
+              "accuracy": 0.99921875,
+              "step": 12000
+            }
+          ],
+          "loss": 0.00026484410045668483,
+          "params": 158608,
+          "train_time_s": 76.21413995791227
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {},
+          "attention_type": "piecewise",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "0f85712",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "piecewise-n64-s1",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 1,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 0.996875,
+          "curve": [
+            {
+              "accuracy": 0.12421875,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.11171875,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.12109375,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.1328125,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.9390625,
+              "step": 5000
+            },
+            {
+              "accuracy": 0.9921875,
+              "step": 6000
+            },
+            {
+              "accuracy": 0.98984375,
+              "step": 7000
+            },
+            {
+              "accuracy": 0.996875,
+              "step": 8000
+            },
+            {
+              "accuracy": 0.99453125,
+              "step": 9000
+            },
+            {
+              "accuracy": 0.99609375,
+              "step": 10000
+            },
+            {
+              "accuracy": 0.99765625,
+              "step": 11000
+            },
+            {
+              "accuracy": 0.996875,
+              "step": 12000
+            }
+          ],
+          "loss": 3.447467679507099e-05,
+          "params": 158608,
+          "train_time_s": 76.99467354197986
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {},
+          "attention_type": "piecewise",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "0f85712",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "piecewise-n64-s2",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 2,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 0.9953125,
+          "curve": [
+            {
+              "accuracy": 0.1296875,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.125,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.11171875,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.1359375,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.159375,
+              "step": 5000
+            },
+            {
+              "accuracy": 0.19765625,
+              "step": 6000
+            },
+            {
+              "accuracy": 0.4796875,
+              "step": 7000
+            },
+            {
+              "accuracy": 0.71015625,
+              "step": 8000
+            },
+            {
+              "accuracy": 0.896875,
+              "step": 9000
+            },
+            {
+              "accuracy": 0.9765625,
+              "step": 10000
+            },
+            {
+              "accuracy": 0.98984375,
+              "step": 11000
+            },
+            {
+              "accuracy": 0.9953125,
+              "step": 12000
+            }
+          ],
+          "loss": 0.0004866774834226817,
+          "params": 158608,
+          "train_time_s": 76.67305895802565
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {},
+          "attention_type": "piecewise",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "0f85712",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "piecewise-n64-s3",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 3,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 0.99453125,
+          "curve": [
+            {
+              "accuracy": 0.128125,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.125,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.1390625,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.12890625,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.5328125,
+              "step": 5000
+            },
+            {
+              "accuracy": 0.63359375,
+              "step": 6000
+            },
+            {
+              "accuracy": 0.896875,
+              "step": 7000
+            },
+            {
+              "accuracy": 0.990625,
+              "step": 8000
+            },
+            {
+              "accuracy": 0.9875,
+              "step": 9000
+            },
+            {
+              "accuracy": 0.9953125,
+              "step": 10000
+            },
+            {
+              "accuracy": 0.99765625,
+              "step": 11000
+            },
+            {
+              "accuracy": 0.99453125,
+              "step": 12000
+            }
+          ],
+          "loss": 0.005144327878952026,
+          "params": 158608,
+          "train_time_s": 79.2216322910972
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {},
+          "attention_type": "piecewise",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "0f85712",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "piecewise-n64-s4",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 4,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 0.99296875,
+          "curve": [
+            {
+              "accuracy": 0.1265625,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.13359375,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.121875,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.1390625,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.14453125,
+              "step": 5000
+            },
+            {
+              "accuracy": 0.39375,
+              "step": 6000
+            },
+            {
+              "accuracy": 0.9609375,
+              "step": 7000
+            },
+            {
+              "accuracy": 0.98125,
+              "step": 8000
+            },
+            {
+              "accuracy": 0.9859375,
+              "step": 9000
+            },
+            {
+              "accuracy": 0.99375,
+              "step": 10000
+            },
+            {
+              "accuracy": 0.99921875,
+              "step": 11000
+            },
+            {
+              "accuracy": 0.99296875,
+              "step": 12000
+            }
+          ],
+          "loss": 0.0001863888173829764,
+          "params": 158608,
+          "train_time_s": 78.44100054097362
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {},
+          "attention_type": "piecewise",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "0f85712",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "piecewise-n64-s5",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 5,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 0.99140625,
+          "curve": [
+            {
+              "accuracy": 0.11171875,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.128125,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.13359375,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.128125,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.1296875,
+              "step": 5000
+            },
+            {
+              "accuracy": 0.14921875,
+              "step": 6000
+            },
+            {
+              "accuracy": 0.1453125,
+              "step": 7000
+            },
+            {
+              "accuracy": 0.89453125,
+              "step": 8000
+            },
+            {
+              "accuracy": 0.96328125,
+              "step": 9000
+            },
+            {
+              "accuracy": 0.996875,
+              "step": 10000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 11000
+            },
+            {
+              "accuracy": 0.99140625,
+              "step": 12000
+            }
+          ],
+          "loss": 0.0032545749563723803,
+          "params": 158608,
+          "train_time_s": 76.57395870797336
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {},
+          "attention_type": "piecewise",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "0f85712",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "piecewise-n64-s6",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 6,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 0.996875,
+          "curve": [
+            {
+              "accuracy": 0.12734375,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.11953125,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.13984375,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.134375,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.16875,
+              "step": 5000
+            },
+            {
+              "accuracy": 0.953125,
+              "step": 6000
+            },
+            {
+              "accuracy": 0.98671875,
+              "step": 7000
+            },
+            {
+              "accuracy": 0.99453125,
+              "step": 8000
+            },
+            {
+              "accuracy": 0.99765625,
+              "step": 9000
+            },
+            {
+              "accuracy": 0.996875,
+              "step": 10000
+            },
+            {
+              "accuracy": 0.9953125,
+              "step": 11000
+            },
+            {
+              "accuracy": 0.996875,
+              "step": 12000
+            }
+          ],
+          "loss": 0.00106979685369879,
+          "params": 158608,
+          "train_time_s": 77.33034337498248
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {},
+          "attention_type": "piecewise",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "0f85712",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "piecewise-n64-s7",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 7,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 0.99609375,
+          "curve": [
+            {
+              "accuracy": 0.12734375,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.11328125,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.10859375,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.12265625,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.1296875,
+              "step": 5000
+            },
+            {
+              "accuracy": 0.90234375,
+              "step": 6000
+            },
+            {
+              "accuracy": 0.98125,
+              "step": 7000
+            },
+            {
+              "accuracy": 0.99296875,
+              "step": 8000
+            },
+            {
+              "accuracy": 0.9921875,
+              "step": 9000
+            },
+            {
+              "accuracy": 0.99609375,
+              "step": 10000
+            },
+            {
+              "accuracy": 0.996875,
+              "step": 11000
+            },
+            {
+              "accuracy": 0.99609375,
+              "step": 12000
+            }
+          ],
+          "loss": 0.0005793577875010669,
+          "params": 158608,
+          "train_time_s": 75.58133841701783
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {
+            "num_anchors": 4
+          },
+          "attention_type": "piecewise_kmeans",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "0f85712",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "piecewise_kmeans-n64-s0",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 0,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 0.98828125,
+          "curve": [
+            {
+              "accuracy": 0.11484375,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.13046875,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.12265625,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.125,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.125,
+              "step": 5000
+            },
+            {
+              "accuracy": 0.17265625,
+              "step": 6000
+            },
+            {
+              "accuracy": 0.95703125,
+              "step": 7000
+            },
+            {
+              "accuracy": 0.9828125,
+              "step": 8000
+            },
+            {
+              "accuracy": 0.98828125,
+              "step": 9000
+            },
+            {
+              "accuracy": 0.97890625,
+              "step": 10000
+            },
+            {
+              "accuracy": 0.99453125,
+              "step": 11000
+            },
+            {
+              "accuracy": 0.98828125,
+              "step": 12000
+            }
+          ],
+          "loss": 0.024651508778333664,
+          "params": 158608,
+          "train_time_s": 203.42220283299685
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {
+            "num_anchors": 4
+          },
+          "attention_type": "piecewise_kmeans",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "924f2b0",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "piecewise_kmeans-n64-s1",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 1,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 0.978125,
+          "curve": [
+            {
+              "accuracy": 0.12109375,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.11015625,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.11640625,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.1390625,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.121875,
+              "step": 5000
+            },
+            {
+              "accuracy": 0.12109375,
+              "step": 6000
+            },
+            {
+              "accuracy": 0.12734375,
+              "step": 7000
+            },
+            {
+              "accuracy": 0.9390625,
+              "step": 8000
+            },
+            {
+              "accuracy": 0.98046875,
+              "step": 9000
+            },
+            {
+              "accuracy": 0.97578125,
+              "step": 10000
+            },
+            {
+              "accuracy": 0.9890625,
+              "step": 11000
+            },
+            {
+              "accuracy": 0.978125,
+              "step": 12000
+            }
+          ],
+          "loss": 0.006611741613596678,
+          "params": 158608,
+          "train_time_s": 204.40666812495328
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {
+            "num_anchors": 4
+          },
+          "attention_type": "piecewise_kmeans",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "924f2b0",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "piecewise_kmeans-n64-s2",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 2,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 0.9984375,
+          "curve": [
+            {
+              "accuracy": 0.125,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.121875,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.1125,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.13984375,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.12890625,
+              "step": 5000
+            },
+            {
+              "accuracy": 0.125,
+              "step": 6000
+            },
+            {
+              "accuracy": 0.125,
+              "step": 7000
+            },
+            {
+              "accuracy": 0.1265625,
+              "step": 8000
+            },
+            {
+              "accuracy": 0.1609375,
+              "step": 9000
+            },
+            {
+              "accuracy": 0.99921875,
+              "step": 10000
+            },
+            {
+              "accuracy": 0.99765625,
+              "step": 11000
+            },
+            {
+              "accuracy": 0.9984375,
+              "step": 12000
+            }
+          ],
+          "loss": 0.00033570040250197053,
+          "params": 158608,
+          "train_time_s": 203.3729320410639
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {
+            "num_anchors": 4
+          },
+          "attention_type": "piecewise_kmeans",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "924f2b0",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "piecewise_kmeans-n64-s3",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 3,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 0.909375,
+          "curve": [
+            {
+              "accuracy": 0.128125,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.121875,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.13984375,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.12890625,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.13828125,
+              "step": 5000
+            },
+            {
+              "accuracy": 0.121875,
+              "step": 6000
+            },
+            {
+              "accuracy": 0.12890625,
+              "step": 7000
+            },
+            {
+              "accuracy": 0.21953125,
+              "step": 8000
+            },
+            {
+              "accuracy": 0.6703125,
+              "step": 9000
+            },
+            {
+              "accuracy": 0.8734375,
+              "step": 10000
+            },
+            {
+              "accuracy": 0.909375,
+              "step": 11000
+            },
+            {
+              "accuracy": 0.909375,
+              "step": 12000
+            }
+          ],
+          "loss": 0.2285550832748413,
+          "params": 158608,
+          "train_time_s": 202.56613695877604
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {
+            "num_anchors": 4
+          },
+          "attention_type": "piecewise_kmeans",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "924f2b0",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "piecewise_kmeans-n64-s4",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 4,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 1.0,
+          "curve": [
+            {
+              "accuracy": 0.134375,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.13359375,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.11796875,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.134375,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.146875,
+              "step": 5000
+            },
+            {
+              "accuracy": 0.1421875,
+              "step": 6000
+            },
+            {
+              "accuracy": 0.13984375,
+              "step": 7000
+            },
+            {
+              "accuracy": 0.1328125,
+              "step": 8000
+            },
+            {
+              "accuracy": 0.14140625,
+              "step": 9000
+            },
+            {
+              "accuracy": 0.99921875,
+              "step": 10000
+            },
+            {
+              "accuracy": 0.99765625,
+              "step": 11000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 12000
+            }
+          ],
+          "loss": 0.0006102659972384572,
+          "params": 158608,
+          "train_time_s": 203.51786299981177
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {
+            "num_anchors": 4
+          },
+          "attention_type": "piecewise_kmeans",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "924f2b0",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "piecewise_kmeans-n64-s5",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 5,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 0.99609375,
+          "curve": [
+            {
+              "accuracy": 0.11796875,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.11953125,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.1390625,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.12890625,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.128125,
+              "step": 5000
+            },
+            {
+              "accuracy": 0.4390625,
+              "step": 6000
+            },
+            {
+              "accuracy": 0.9765625,
+              "step": 7000
+            },
+            {
+              "accuracy": 0.9859375,
+              "step": 8000
+            },
+            {
+              "accuracy": 0.99453125,
+              "step": 9000
+            },
+            {
+              "accuracy": 0.99375,
+              "step": 10000
+            },
+            {
+              "accuracy": 0.99765625,
+              "step": 11000
+            },
+            {
+              "accuracy": 0.99609375,
+              "step": 12000
+            }
+          ],
+          "loss": 0.00340178026817739,
+          "params": 158608,
+          "train_time_s": 204.0138890000526
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {
+            "num_anchors": 4
+          },
+          "attention_type": "piecewise_kmeans",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "924f2b0",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "piecewise_kmeans-n64-s6",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 6,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 0.99765625,
+          "curve": [
+            {
+              "accuracy": 0.12109375,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.1140625,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.13671875,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.13046875,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.1296875,
+              "step": 5000
+            },
+            {
+              "accuracy": 0.1390625,
+              "step": 6000
+            },
+            {
+              "accuracy": 0.11953125,
+              "step": 7000
+            },
+            {
+              "accuracy": 0.13046875,
+              "step": 8000
+            },
+            {
+              "accuracy": 0.98828125,
+              "step": 9000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 10000
+            },
+            {
+              "accuracy": 0.99765625,
+              "step": 11000
+            },
+            {
+              "accuracy": 0.99765625,
+              "step": 12000
+            }
+          ],
+          "loss": 0.0005822806851938367,
+          "params": 158608,
+          "train_time_s": 203.6885442500934
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {
+            "num_anchors": 4
+          },
+          "attention_type": "piecewise_kmeans",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "924f2b0",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "piecewise_kmeans-n64-s7",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 7,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 1.0,
+          "curve": [
+            {
+              "accuracy": 0.1265625,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.1078125,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.1046875,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.13203125,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.13046875,
+              "step": 5000
+            },
+            {
+              "accuracy": 0.13046875,
+              "step": 6000
+            },
+            {
+              "accuracy": 0.1265625,
+              "step": 7000
+            },
+            {
+              "accuracy": 0.128125,
+              "step": 8000
+            },
+            {
+              "accuracy": 0.9984375,
+              "step": 9000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 10000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 11000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 12000
+            }
+          ],
+          "loss": 0.0001869022089522332,
+          "params": 158608,
+          "train_time_s": 204.76994766690768
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {
+            "num_anchors": 4
+          },
+          "attention_type": "piecewise_stride",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "924f2b0",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "piecewise_stride-n64-s0",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 0,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 0.990625,
+          "curve": [
+            {
+              "accuracy": 0.121875,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.13125,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.1203125,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.121875,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.14921875,
+              "step": 5000
+            },
+            {
+              "accuracy": 0.9484375,
+              "step": 6000
+            },
+            {
+              "accuracy": 0.9921875,
+              "step": 7000
+            },
+            {
+              "accuracy": 0.9875,
+              "step": 8000
+            },
+            {
+              "accuracy": 0.9921875,
+              "step": 9000
+            },
+            {
+              "accuracy": 0.9890625,
+              "step": 10000
+            },
+            {
+              "accuracy": 0.99453125,
+              "step": 11000
+            },
+            {
+              "accuracy": 0.990625,
+              "step": 12000
+            }
+          ],
+          "loss": 0.015531155280768871,
+          "params": 158608,
+          "train_time_s": 183.71878229198046
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {
+            "num_anchors": 4
+          },
+          "attention_type": "piecewise_stride",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "924f2b0",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "piecewise_stride-n64-s1",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 1,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 1.0,
+          "curve": [
+            {
+              "accuracy": 0.11875,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.11328125,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.1125,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.1328125,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.12265625,
+              "step": 5000
+            },
+            {
+              "accuracy": 0.1515625,
+              "step": 6000
+            },
+            {
+              "accuracy": 0.91875,
+              "step": 7000
+            },
+            {
+              "accuracy": 0.96953125,
+              "step": 8000
+            },
+            {
+              "accuracy": 0.99765625,
+              "step": 9000
+            },
+            {
+              "accuracy": 0.99921875,
+              "step": 10000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 11000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 12000
+            }
+          ],
+          "loss": 0.00010133576870430261,
+          "params": 158608,
+          "train_time_s": 183.48690841696225
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {
+            "num_anchors": 4
+          },
+          "attention_type": "piecewise_stride",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "924f2b0",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "piecewise_stride-n64-s2",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 2,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 1.0,
+          "curve": [
+            {
+              "accuracy": 0.12578125,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.11953125,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.1203125,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.13984375,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.1671875,
+              "step": 5000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 6000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 7000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 8000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 9000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 10000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 11000
+            },
+            {
+              "accuracy": 1.0,
+              "step": 12000
+            }
+          ],
+          "loss": 1.6223475540755317e-05,
+          "params": 158608,
+          "train_time_s": 183.81825074995868
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {
+            "num_anchors": 4
+          },
+          "attention_type": "piecewise_stride",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "924f2b0",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "piecewise_stride-n64-s3",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 3,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 0.99453125,
+          "curve": [
+            {
+              "accuracy": 0.128125,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.12734375,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.13984375,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.13046875,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.27890625,
+              "step": 5000
+            },
+            {
+              "accuracy": 0.83125,
+              "step": 6000
+            },
+            {
+              "accuracy": 0.9796875,
+              "step": 7000
+            },
+            {
+              "accuracy": 0.9875,
+              "step": 8000
+            },
+            {
+              "accuracy": 0.9921875,
+              "step": 9000
+            },
+            {
+              "accuracy": 0.99453125,
+              "step": 10000
+            },
+            {
+              "accuracy": 0.996875,
+              "step": 11000
+            },
+            {
+              "accuracy": 0.99453125,
+              "step": 12000
+            }
+          ],
+          "loss": 0.00041540738311596215,
+          "params": 158608,
+          "train_time_s": 183.87037937506102
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {
+            "num_anchors": 4
+          },
+          "attention_type": "piecewise_stride",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "924f2b0",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "piecewise_stride-n64-s4",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 4,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 0.99453125,
+          "curve": [
+            {
+              "accuracy": 0.1328125,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.1328125,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.121875,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.13515625,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.1765625,
+              "step": 5000
+            },
+            {
+              "accuracy": 0.3140625,
+              "step": 6000
+            },
+            {
+              "accuracy": 0.43046875,
+              "step": 7000
+            },
+            {
+              "accuracy": 0.7234375,
+              "step": 8000
+            },
+            {
+              "accuracy": 0.9953125,
+              "step": 9000
+            },
+            {
+              "accuracy": 0.9984375,
+              "step": 10000
+            },
+            {
+              "accuracy": 0.99921875,
+              "step": 11000
+            },
+            {
+              "accuracy": 0.99453125,
+              "step": 12000
+            }
+          ],
+          "loss": 0.000858273939229548,
+          "params": 158608,
+          "train_time_s": 183.45151537517086
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {
+            "num_anchors": 4
+          },
+          "attention_type": "piecewise_stride",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "924f2b0",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "piecewise_stride-n64-s5",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 5,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 0.99921875,
+          "curve": [
+            {
+              "accuracy": 0.11953125,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.1234375,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.13984375,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.13125,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.13125,
+              "step": 5000
+            },
+            {
+              "accuracy": 0.128125,
+              "step": 6000
+            },
+            {
+              "accuracy": 0.27109375,
+              "step": 7000
+            },
+            {
+              "accuracy": 0.98203125,
+              "step": 8000
+            },
+            {
+              "accuracy": 0.99921875,
+              "step": 9000
+            },
+            {
+              "accuracy": 0.9953125,
+              "step": 10000
+            },
+            {
+              "accuracy": 0.996875,
+              "step": 11000
+            },
+            {
+              "accuracy": 0.99921875,
+              "step": 12000
+            }
+          ],
+          "loss": 6.154511356726289e-05,
+          "params": 158608,
+          "train_time_s": 183.90675750002265
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {
+            "num_anchors": 4
+          },
+          "attention_type": "piecewise_stride",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "924f2b0",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "piecewise_stride-n64-s6",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 6,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 0.9953125,
+          "curve": [
+            {
+              "accuracy": 0.128125,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.11328125,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.134375,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.13046875,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.13203125,
+              "step": 5000
+            },
+            {
+              "accuracy": 0.36015625,
+              "step": 6000
+            },
+            {
+              "accuracy": 0.55234375,
+              "step": 7000
+            },
+            {
+              "accuracy": 0.7375,
+              "step": 8000
+            },
+            {
+              "accuracy": 0.99375,
+              "step": 9000
+            },
+            {
+              "accuracy": 0.99609375,
+              "step": 10000
+            },
+            {
+              "accuracy": 0.996875,
+              "step": 11000
+            },
+            {
+              "accuracy": 0.9953125,
+              "step": 12000
+            }
+          ],
+          "loss": 0.0004559966910164803,
+          "params": 158608,
+          "train_time_s": 183.55704712495208
+        }
+      },
+      {
+        "config": {
+          "attention_kwargs": {
+            "num_anchors": 4
+          },
+          "attention_type": "piecewise_stride",
+          "batch_size": 64,
+          "device": "auto",
+          "dropout": 0.0,
+          "eval_batches": 20,
+          "git_sha": "924f2b0",
+          "grad_clip": 1.0,
+          "hidden_dim": 96,
+          "lr": 0.001,
+          "name": "piecewise_stride-n64-s7",
+          "num_heads": 4,
+          "num_layers": 2,
+          "schema_version": 1,
+          "seed": 7,
+          "seq_len": 64,
+          "steps": 12000,
+          "task": "synthetic_recall",
+          "vocab_size": 16,
+          "weight_decay": 0.0001
+        },
+        "metrics": {
+          "accuracy": 0.99921875,
+          "curve": [
+            {
+              "accuracy": 0.1296875,
+              "step": 1000
+            },
+            {
+              "accuracy": 0.1078125,
+              "step": 2000
+            },
+            {
+              "accuracy": 0.10625,
+              "step": 3000
+            },
+            {
+              "accuracy": 0.12734375,
+              "step": 4000
+            },
+            {
+              "accuracy": 0.1328125,
+              "step": 5000
+            },
+            {
+              "accuracy": 0.1328125,
+              "step": 6000
+            },
+            {
+              "accuracy": 0.2546875,
+              "step": 7000
+            },
+            {
+              "accuracy": 0.40625,
+              "step": 8000
+            },
+            {
+              "accuracy": 0.9875,
+              "step": 9000
+            },
+            {
+              "accuracy": 0.99921875,
+              "step": 10000
+            },
+            {
+              "accuracy": 0.996875,
+              "step": 11000
+            },
+            {
+              "accuracy": 0.99921875,
+              "step": 12000
+            }
+          ],
+          "loss": 0.001563532743602991,
+          "params": 158608,
+          "train_time_s": 183.75522325001657
+        }
+      }
+    ]
+  },
+  "metrics": {
+    "random_baseline": 0.0625
+  },
+  "schema_version": 1
+}
