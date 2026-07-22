@@ -1,183 +1,54 @@
 # Transformer Integration Experiments
 
-This directory contains experiments comparing PiecewiseAttention against StandardAttention in a full transformer architecture for German→English machine translation.
+End-to-end experiments that plug the attention mechanisms into full models on real tasks. Each subdirectory is self-contained with its own `train.py` and a Colab notebook.
 
-## Quick Start
+| Task | Model | Dataset | Script |
+|------|-------|---------|--------|
+| Translation | Encoder–decoder Transformer | Multi30K (de→en) | `translation/train.py` |
+| Vision | Vision Transformer (ViT) | CIFAR-10 | `vision/train.py` |
+| Text classification | BERT-style encoder | GLUE SST-2 | `bert/train.py` |
 
-### 1. Run Quick Test (5-10 minutes)
+All scripts select the attention variant with `--attention-types` and accept `standard`, `linear`, `performer`, and the piecewise variants (`piecewise`, `piecewise_kmeans`, `piecewise_stride`).
 
-```bash
-# Test piecewise attention only, minimal data
-python train_comparison.py \
-  --attention piecewise \
-  --epochs 3 \
-  --batch-size 32 \
-  --max-train 1000 \
-  --max-eval 100 \
-  --device cpu
-```
-
-### 2. Run Full Comparison (30-60 minutes)
+## Quick start
 
 ```bash
-# Train both standard and piecewise, compare results
-python train_comparison.py \
-  --attention both \
-  --epochs 5 \
-  --batch-size 32 \
-  --max-train 2000 \
-  --max-eval 200 \
-  --device cpu
+# Install with experiment dependencies (from the repo root)
+uv pip install -e ".[experiments]"
+
+# Translation — defaults train on a Multi30K subset
+python experiments/translation/train.py --epochs 10 --save results/translation/results.json
+
+# Vision — ViT on CIFAR-10
+python experiments/vision/train.py --attention-types piecewise --save results/vision/cifar10.json
+
+# Text classification — BERT on SST-2
+python experiments/bert/train.py --attention-types piecewise --save results/bert/sst2.json
 ```
 
-### 3. Evaluate and Plot
+Compare multiple variants in one run by passing several to `--attention-types`, e.g.
+`--attention-types standard piecewise performer`.
 
-```bash
-# Generate comparison plots and statistics
-python evaluate_comparison.py
-```
+## On GPU
 
-## Files
+Pass `--device cuda` (where the script supports it) for realistic speedups; CPU/MPS runs are fine for correctness and small-scale comparisons but are not representative of production throughput.
 
-- `multihead.py` (to be created) - Multi-head attention wrapper compatible with Homework 5
-- `transformer_homework5.py` (to be created) - Modified transformer with pluggable attention
-- `train_comparison.py` (to be created) - Training script for both attention types
-- `evaluate_comparison.py` (to be created) - Evaluation and plotting
-- `results/` - Saved models and results (created automatically)
+## Notebooks
 
-## Directory Structure
+Each task has a Colab notebook (`colab_*.ipynb`) that clones the repo (with branch selection), installs dependencies, and runs the comparison with free GPU. Links are in the main [README](../README.md#try-it-on-google-colab).
 
-```
-experiments/
-├── README.md                    # This file
-├── multihead.py                 # Multi-head wrapper for PiecewiseAttention
-├── transformer_homework5.py     # Configurable transformer
-├── train_comparison.py          # Training script
-├── evaluate_comparison.py       # Evaluation script
-└── results/                     # Output directory
-    ├── standard/
-    │   ├── best_model.pt
-    │   └── results.json
-    ├── piecewise/
-    │   ├── best_model.pt
-    │   └── results.json
-    └── comparison.png
-```
+## Shared utilities
 
-## Expected Output
+`utils/` holds the pieces the task scripts share:
 
-After running experiments, you'll get:
+- `training.py` — `train_epoch`, `evaluate` loops.
+- `data.py` — tokenization, vocabulary building, dataset/collate helpers.
 
-1. **Trained models**: `results/{standard,piecewise}/best_model.pt`
-2. **Results JSON**: Training/eval losses, timing info
-3. **Comparison plot**: Side-by-side training curves
-4. **Console summary**: Speedup, perplexity comparison
+## Status and caveats
 
-## Integration Guide
+These integrations exist to move the method beyond synthetic microbenchmarks toward real-data task quality. Rigorous, versioned real-task results (matched budgets, multiple seeds, CUDA timing, and comparison against strong efficient-attention baselines) are ongoing work tracked in the repository issues — treat any single run here as a smoke test of the integration, not a benchmark claim.
 
-For complete implementation details, see:
-**`/Users/I745505/private/piecewise-linear-attention/INTEGRATION_WITH_TRANSFORMER.md`**
+## See also
 
-That document includes:
-- Full code implementations
-- Architecture diagrams
-- Troubleshooting guide
-- Expected results
-- Next steps
-
-## Requirements
-
-Before running experiments:
-
-1. **Install piecewise-linear-attention**:
-   ```bash
-   cd /Users/I745505/private/piecewise-linear-attention
-   uv pip install -e .
-   ```
-
-2. **Dataset access**: Will automatically download Multi30k from HuggingFace
-
-3. **Homework 5 code**: Must exist at:
-   `/Users/I745505/private/NLP/exam_prep/homework_solutions/nlp-exercise-5-solution-main/`
-
-## Configuration Options
-
-All scripts support these arguments:
-
-- `--attention`: `standard`, `piecewise`, or `both`
-- `--device`: `cpu` or `cuda`
-- `--epochs`: Number of training epochs (default: 10)
-- `--batch-size`: Batch size (default: 64)
-- `--max-train`: Max training samples (default: 5000)
-- `--max-eval`: Max eval samples (default: 500)
-
-## GPU Training
-
-To run on GPU (much faster):
-
-```bash
-python train_comparison.py \
-  --attention both \
-  --epochs 10 \
-  --batch-size 64 \
-  --device cuda
-```
-
-## Understanding Results
-
-### Good Results Example
-
-```
-Standard Attention:
-  Best loss: 1.50, Perplexity: 4.5, Time: 300s
-
-Piecewise Attention:
-  Best loss: 1.65, Perplexity: 5.2, Time: 75s
-
-Speedup: 4.0×
-Perplexity increase: 15% → GOOD TRADEOFF
-```
-
-### Success Criteria
-
-- **Minimal**: Loss decreases, perplexity < 20
-- **Good**: Perplexity within 20% of baseline, 2×+ speedup
-- **Strong**: Perplexity within 10% of baseline, 5×+ speedup
-
-## Troubleshooting
-
-### Import errors
-```
-ModuleNotFoundError: No module named 'piecewise_linear_attention'
-```
-→ Run `uv pip install -e .` from project root
-
-### Shape mismatch
-```
-RuntimeError: shape mismatch in attention
-```
-→ Check mask dimensions, verify Q/K/V shapes match expected
-
-### NaN loss
-```
-Loss becomes NaN after few iterations
-```
-→ Lower learning rate, add gradient clipping, check for numerical issues
-
-See full troubleshooting guide in INTEGRATION_WITH_TRANSFORMER.md
-
-## Next Steps
-
-After successful integration:
-
-1. **GPU benchmarks**: Run on CUDA for realistic speedup measurements
-2. **Scale up**: Train on full dataset, larger models
-3. **Error analysis**: Understand where approximation causes issues
-4. **Optimization**: Try different pseudo-query selection strategies
-
-## Contact
-
-For questions or issues, refer to:
-- Main integration guide: `INTEGRATION_WITH_TRANSFORMER.md`
-- Theory document: `../THEORY.md`
-- Project handover: `../HANDOVER.md`
+- Reproducible synthetic evidence: [`../benchmarks/`](../benchmarks/) and [`../results/`](../results/).
+- Method and derivation: [`../THEORY.md`](../THEORY.md).

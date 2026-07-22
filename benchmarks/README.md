@@ -1,52 +1,64 @@
 # Benchmarks
 
-Simple benchmarking tools for attention mechanisms.
+Tools for measuring attention mechanisms, split into two layers:
 
-## Quick Start
+- **Evidence harness** (`harness/`) — reproducible CLIs that emit versioned JSON under [`../results/`](../results/). These are the source of the numbers in the main [README](../README.md).
+- **Standalone tools** — an isolated attention benchmark and a memory profiler.
 
-### Time & Accuracy
+## Evidence harness
+
+Each CLI has a `--smoke` mode (seconds) used by the test suite; drop it for a full run.
+
 ```bash
-uv run python benchmark.py
+# Forward wall-clock vs sequence length -> results/scaling.json
+python harness/run_scaling.py --lengths 512 1024 2048 4096 --out ../results/scaling.json
+
+# Approximation error to exact softmax over a dispersion x length grid -> results/microbench.json
+python harness/run_microbench.py --out ../results/microbench.json
+
+# Associative recall, seed-averaged accuracy (long run) -> results/recall.json
+python harness/run_recall.py --seeds 0 1 2 3 4 5 6 7 --lengths 64 \
+    --steps 12000 --eval-every 1000 --out ../results/recall.json
+
+# Two-panel speed-vs-quality figure from the JSON above (PNG is not committed)
+python harness/plot_results.py --out ../results/speed_vs_quality.png
 ```
 
-### Memory Profiling
+Methods compared: `standard`, `linear`, `performer`, `piecewise` (single mean anchor), `piecewise_kmeans`, `piecewise_stride`.
+
+### What the harness shows
+
+- **Speed** (`scaling.json`): the single mean-anchor forward is ~4× faster than Performer at `n=4096` and the linear-time methods cross below softmax around `n≈1024` (dim=24, B·H=256, MPS).
+- **Approximation quality** (`microbench.json`): centroid anchors (mean, k-means) track softmax more closely than positional (stride), linear, or Performer.
+- **Recall** (`recall.json`): the mean anchor solves the task (~0.995, 8 seeds); linear attention fails at chance.
+
+See the main [README](../README.md#results) for the full tables and honest scope (synthetic tasks, small models, MPS timing — not CUDA or real-data end-to-end).
+
+## Standalone tools
+
+### Isolated attention benchmark
+
 ```bash
-# Default (medium scale)
-uv run python profile_memory.py
-
-# Custom config
-uv run python profile_memory.py --batch 32 --seq-len 4096 --dim 64
-
-# Preset configurations
-uv run python profile_memory.py --preset large
+python benchmark_attention.py            # time + error for standard/linear/piecewise
+python benchmark_attention.py --causal   # causal masking path
+python benchmark_attention.py --scale    # scaling analysis
 ```
 
-**Presets**: `small` | `medium` | `large` | `all`
+### Memory profiling
 
-## Output Example
-
-```
-Config: batch=32, seq_len=4096, dim=64
-------------------------------------------------------------
-StandardAttention:     180.02 ms |   6085 MB
-LinearAttention:         5.84 ms |   6085 MB | 30.81× |  71.4% error
-PiecewiseAttention:      5.59 ms |   6085 MB | 32.20× |  51.7% error ✅
+```bash
+python profile_memory.py                                   # medium preset
+python profile_memory.py --preset large
+python profile_memory.py --batch 32 --seq-len 4096 --dim 64
 ```
 
-## Key Results
-
-**Very large scale** (batch=64, n=4096, dim=64 - 16.8M elements):
-- **84× speedup** with **52% error** (PiecewiseAttention)
-- 20pp better accuracy than LinearAttention
-- Memory: O(d²) - constant with sequence length
-- Speedup scales with batch size
-
-See main [README.md](../README.md) for full results.
+Presets: `small` | `medium` | `large` | `all`. Memory is `O(d²)` in the apply — constant with sequence length.
 
 ## Tests
 
 ```bash
-uv run pytest piecewise_linear_attention/tests/test_memory_profile.py -v
+pytest ../piecewise_linear_attention/tests/test_evidence_cli.py -v   # harness pipeline
+pytest ../piecewise_linear_attention/tests/test_memory_profile.py -v # memory profiler
 ```
 
 ## Dependencies
