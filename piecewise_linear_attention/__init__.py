@@ -28,6 +28,9 @@ from .core.anchors import (
 from .core.attention import (
     EfficientAttention,
     LinearAttention,
+    LinformerAttention,
+    LunaAttention,
+    NystromformerAttention,
     PerformerAttention,
     PiecewiseAttention,
     StandardAttention,
@@ -45,6 +48,9 @@ __all__ = [
     "StandardAttention",
     "LinearAttention",
     "PerformerAttention",
+    "NystromformerAttention",
+    "LinformerAttention",
+    "LunaAttention",
     "PiecewiseAttention",
     # Convenient alias
     "EfficientAttention",

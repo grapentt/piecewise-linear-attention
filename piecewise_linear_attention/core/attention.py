@@ -7,6 +7,7 @@ This module provides three attention implementations:
 """
 
 import math
+import warnings
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Callable, Optional, Tuple
 
@@ -706,6 +707,519 @@ class PiecewiseAttention(BaseAttention):
         return output, pseudo_queries
 
 
+class NystromformerAttention(BaseAttention):
+    """Nyströmformer attention via Nyström approximation of softmax self-attention.
+
+    Approximates the full softmax attention matrix in linear time using the
+    Nyström method (Xiong et al., 2021, "Nyströmformer: A Nyström-Based
+    Algorithm for Approximating Self-Attention"). Rather than materializing the
+    dense ``(n, n)`` softmax matrix, ``m`` *landmark* points are chosen as the
+    segment means of the queries and keys, and the attention output is
+    reconstructed from three small softmax kernels
+
+        kernel1 = softmax(Q       @ K_land^T)   # (b, n, m)
+        kernel2 = softmax(Q_land  @ K_land^T)   # (b, m, m)
+        kernel3 = softmax(Q_land  @ K^T)        # (b, m, n)
+
+    as ``output = kernel1 @ pinv(kernel2) @ (kernel3 @ V)``. All three softmax
+    scores are scaled by ``1 / sqrt(dim)``, matching standard scaled
+    dot-product attention. The middle factor ``pinv(kernel2)`` is the
+    Moore–Penrose pseudo-inverse of the ``(m, m)`` landmark-to-landmark kernel,
+    computed with the cubically-convergent iterative scheme used by the
+    reference implementation — no explicit matrix inverse or SVD is formed, so
+    the whole operator is differentiable and runs on-device.
+
+    Complexity: O(batch * n * m * d) with a small constant ``m``, versus the
+    O(batch * n^2 * d) of full softmax attention.
+
+    Landmark selection uses contiguous **segment means**: the ``n`` tokens are
+    split into ``m`` equal contiguous segments and averaged within each. This
+    mixes information across the whole sequence, including future tokens, so
+    Nyströmformer has **no exact causal formulation** — a causal landmark would
+    need per-position segment means, which the segment-mean construction does
+    not provide. Constructing this module with ``causal=True`` therefore raises
+    ``NotImplementedError``.
+
+    When ``seq_len <= num_landmarks`` the landmark approximation cannot help and
+    the pseudo-inverse becomes ill-posed, so the module falls back to *exact*
+    softmax attention for that call and records ``num_landmarks = seq_len`` in
+    the diagnostics. The segment-mean construction here requires ``n`` to be
+    divisible by ``m``; when it is not, the effective landmark count is reduced
+    to the largest divisor of ``n`` that does not exceed ``num_landmarks`` (this
+    keeps the reshape exact rather than padding the sequence). A prime ``n``
+    collapses to a single global landmark; a warning is emitted when the
+    effective count drops far below the requested value.
+
+    This implementation is deliberately **parameter-free**: unlike the full
+    paper, it omits the learned depthwise-convolution skip connection so that it
+    matches the repository's parameter-free-attention baselines. Only the
+    Nyström approximation core is modelled.
+
+    The second element returned by :meth:`forward` is a per-batch conditioning
+    diagnostic: the Frobenius residual ``||A @ Z @ A - A||_F`` of the iterative
+    pseudo-inverse ``Z`` of ``A = kernel2``. This residual measures how well the
+    fixed-iteration scheme inverted the landmark kernel: it is near zero when
+    the kernel is well-conditioned, but the iteration can fail to converge when
+    the landmark kernel becomes near-singular (few, highly-similar landmarks),
+    in which case the residual — and the resulting attention — degrade. Recording
+    this fragility is a deliberate differentiator of the method. The residual is
+    cached on ``self.last_pinv_residual`` together with the effective landmark
+    count ``self.last_num_landmarks`` for later inspection.
+
+    Parameters
+    ----------
+    dim:
+        Per-head embedding dimension.
+    dropout:
+        Dropout probability applied to the output.
+    num_landmarks:
+        Requested number of Nyström landmarks ``m``. Reduced to a divisor of
+        the sequence length when ``n`` is not divisible by ``m``.
+    pinv_iterations:
+        Number of iterations of the cubically-convergent Moore–Penrose
+        pseudo-inverse scheme applied to the landmark kernel.
+    eps:
+        Numerical-stability constant used when initializing the iteration.
+    causal:
+        Must be ``False``. Passing ``True`` raises ``NotImplementedError``
+        because segment-mean landmarks mix future tokens.
+    """
+
+    def __init__(
+        self,
+        dim: int,
+        dropout: float = 0.0,
+        num_landmarks: int = 64,
+        pinv_iterations: int = 6,
+        eps: float = 1e-8,
+        causal: bool = False,
+    ):
+        super().__init__(dim, dropout)
+        if causal:
+            raise NotImplementedError(
+                "NystromformerAttention has no exact causal formulation: landmarks "
+                "are segment means over contiguous token blocks, so every landmark "
+                "mixes future tokens. Use StandardAttention/PiecewiseAttention "
+                "(causal=True) for autoregressive settings."
+            )
+        self.num_landmarks = num_landmarks
+        self.pinv_iterations = pinv_iterations
+        self.eps = eps
+        self.causal = causal
+
+        # Diagnostics populated on each forward pass.
+        self.last_pinv_residual: Optional[torch.Tensor] = None
+        self.last_num_landmarks: Optional[int] = None
+
+    def _iterative_pinv(self, A: torch.Tensor) -> torch.Tensor:
+        """Moore–Penrose pseudo-inverse via a cubically-convergent iteration.
+
+        Starting from ``Z_0 = A^T / (max_row_abs_sum(A) * max_col_abs_sum(A))``
+        the update
+
+            Z <- 0.25 * Z @ (13 I - A @ Z @ (15 I - A @ Z @ (7 I - A @ Z)))
+
+        is applied ``pinv_iterations`` times, converging to ``A^+`` at a cubic
+        rate without forming an explicit inverse or SVD.
+
+        Parameters
+        ----------
+        A:
+            Batched square matrices of shape ``(batch, m, m)``.
+
+        Returns
+        -------
+        torch.Tensor
+            Approximate pseudo-inverse of shape ``(batch, m, m)``.
+        """
+        m = A.shape[-1]
+        identity = torch.eye(m, device=A.device, dtype=A.dtype).expand_as(A)
+
+        # Row-sum / column-sum norm bound guarantees the iteration converges.
+        max_abs_row_sum = torch.max(torch.sum(torch.abs(A), dim=-1), dim=-1).values
+        max_abs_col_sum = torch.max(torch.sum(torch.abs(A), dim=-2), dim=-1).values
+        denom = (max_abs_row_sum * max_abs_col_sum).clamp_min(self.eps)
+        Z = A.transpose(-2, -1) / denom.unsqueeze(-1).unsqueeze(-1)
+
+        for _ in range(self.pinv_iterations):
+            AZ = torch.matmul(A, Z)
+            Z = torch.matmul(
+                0.25 * Z,
+                13 * identity
+                - torch.matmul(
+                    AZ,
+                    15 * identity - torch.matmul(AZ, 7 * identity - AZ),
+                ),
+            )
+        return Z
+
+    def forward(
+        self,
+        Q: torch.Tensor,
+        K: torch.Tensor,
+        V: torch.Tensor,
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        """Compute Nyströmformer attention.
+
+        Parameters
+        ----------
+        Q, K, V:
+            Query/key/value tensors of shape ``(batch, seq_len, dim)``.
+
+        Returns
+        -------
+        output:
+            Attention output of shape ``(batch, seq_len, dim)``.
+        pinv_residual:
+            Per-batch pseudo-inverse Frobenius residual
+            ``||A @ Z @ A - A||_F`` of shape ``(batch,)`` measuring the
+            conditioning of the landmark kernel; ``None`` on the exact-softmax
+            fallback path.
+        """
+        batch, seq_len, dim = Q.shape
+        scale = 1.0 / math.sqrt(dim)
+        sqrt_scale = math.sqrt(scale)
+
+        # Pre-scale Q and K by sqrt(scale) each, so that any Q_s @ K_s^T below
+        # already carries the full 1/sqrt(dim) factor of scaled dot-product
+        # scores.
+        Q_s = Q * sqrt_scale
+        K_s = K * sqrt_scale
+
+        m = self.num_landmarks
+
+        # Fallback: with as many (or more) landmarks than tokens the Nyström
+        # approximation cannot help and kernel2 is ill-posed, so compute exact
+        # softmax attention instead.
+        if seq_len <= m:
+            scores = torch.matmul(Q_s, K_s.transpose(-2, -1))  # (b, n, n)
+            attn = F.softmax(scores, dim=-1)
+            output = self.dropout(torch.matmul(attn, V))
+            self.last_num_landmarks = seq_len
+            self.last_pinv_residual = None
+            return output, None
+
+        # The reshape-based segment mean requires n % m == 0. If it does not
+        # divide, fall back to the largest divisor of n not exceeding m so the
+        # reshape stays exact (no sequence padding). A prime n collapses to 1.
+        if seq_len % m != 0:
+            m = max(d for d in range(1, m + 1) if seq_len % d == 0)
+            if m < self.num_landmarks // 2:
+                warnings.warn(
+                    f"Nyströmformer reduced landmarks from {self.num_landmarks} to "
+                    f"{m} because seq_len={seq_len} is not divisible by "
+                    f"{self.num_landmarks}; the approximation degrades. Choose a "
+                    f"seq_len divisible by the requested landmark count.",
+                    stacklevel=2,
+                )
+
+        segment = seq_len // m
+
+        # Landmarks as contiguous segment means: reshape (b, m, segment, d) and
+        # average within each segment.
+        Q_landmarks = Q_s.reshape(batch, m, segment, dim).mean(dim=2)  # (b, m, d)
+        K_landmarks = K_s.reshape(batch, m, segment, dim).mean(dim=2)  # (b, m, d)
+
+        # Three softmax kernels (scores already carry the 1/sqrt(dim) scale).
+        kernel1 = F.softmax(torch.matmul(Q_s, K_landmarks.transpose(-2, -1)), dim=-1)  # (b, n, m)
+        kernel2 = F.softmax(
+            torch.matmul(Q_landmarks, K_landmarks.transpose(-2, -1)), dim=-1
+        )  # (b, m, m)
+        kernel3 = F.softmax(torch.matmul(Q_landmarks, K_s.transpose(-2, -1)), dim=-1)  # (b, m, n)
+
+        # Iterative pseudo-inverse of the landmark-to-landmark kernel.
+        kernel2_pinv = self._iterative_pinv(kernel2)  # (b, m, m)
+
+        # Conditioning diagnostic: Frobenius residual ||A Z A - A||_F per batch.
+        # Near zero for well-conditioned kernels; diverges as m shrinks.
+        residual = torch.matmul(torch.matmul(kernel2, kernel2_pinv), kernel2) - kernel2
+        pinv_residual = torch.linalg.norm(residual.reshape(batch, -1), dim=-1)  # (b,)
+
+        # output = kernel1 @ pinv(kernel2) @ (kernel3 @ V)
+        kernel3_v = torch.matmul(kernel3, V)  # (b, m, d)
+        output = torch.matmul(kernel1, torch.matmul(kernel2_pinv, kernel3_v))  # (b, n, d)
+        output = self.dropout(output)
+
+        # Record diagnostics only once the successful path has fully computed.
+        self.last_num_landmarks = m
+        self.last_pinv_residual = pinv_residual.detach()
+
+        return output, pinv_residual
+
+
+class LinformerAttention(BaseAttention):
+    """Linformer attention with low-rank projection of the sequence axis.
+
+    Approximates full softmax attention in linear time by projecting the key
+    and value sequences from length ``n`` down to a fixed rank ``k`` along the
+    sequence axis (Wang et al., 2020, "Linformer: Self-Attention with Linear
+    Complexity"). Two learned projection matrices ``E`` and ``F`` compress the
+    keys and values,
+
+        K_proj = E_n^T @ K   (shape (batch, k, dim)),
+        V_proj = F_n^T @ V   (shape (batch, k, dim)),
+
+    after which attention is computed against the compressed memory,
+
+        Attention(Q, K, V) = softmax(Q @ K_proj^T / sqrt(d)) @ V_proj.
+
+    Because the score matrix is ``(n, k)`` rather than ``(n, n)``, the cost is
+    linear in the sequence length: O(batch * n * k * d).
+
+    Same-length-only baseline
+    --------------------------
+    The projections ``E`` and ``F`` are defined over a fixed maximum sequence
+    length ``max_seq_len`` and act directly on absolute sequence positions. A
+    sequence of length ``n`` uses the first ``n`` rows, ``E[:n]`` and ``F[:n]``.
+    This makes Linformer a SAME-LENGTH-ONLY baseline: it CANNOT generalize to
+    sequences longer than ``max_seq_len`` (there are simply no projection rows
+    for those positions), and because the learned projection is tied to
+    absolute positions, its compression is specialized to the training-time
+    layout rather than being length-agnostic.
+
+    Parameter cost
+    --------------
+    Unlike softmax attention or Performer (whose random features are drawn from
+    a fixed seed and stored in a non-persistent buffer), Linformer is NOT
+    parameter-free: it adds ``2 * max_seq_len * k`` learned parameters (the two
+    projection matrices ``E`` and ``F``).
+
+    Parameters
+    ----------
+    dim:
+        Per-head embedding dimension.
+    dropout:
+        Dropout probability applied to the output.
+    max_seq_len:
+        Fixed maximum sequence length the projections are defined over. Inputs
+        with ``seq_len > max_seq_len`` are rejected.
+    k:
+        Low-rank projection dimension along the sequence axis. The paper uses
+        values in ``{128, 256}``; larger ``k`` trades compute for a tighter
+        approximation of full attention.
+    causal:
+        Must be False. The sequence-axis projection mixes information across the
+        whole sequence, so there is no valid causal (autoregressive) form;
+        passing True raises ``NotImplementedError``.
+
+    Notes
+    -----
+    With random initialization the low-rank approximation is not expected to
+    match full softmax attention numerically, even at large ``k`` — the
+    projections must be trained. The meaningful init-time sanity check is
+    therefore that the output has the correct shape and is finite, not that it
+    reproduces softmax within a tolerance.
+    """
+
+    def __init__(
+        self,
+        dim: int,
+        dropout: float = 0.0,
+        max_seq_len: int = 512,
+        k: int = 256,
+        causal: bool = False,
+    ):
+        super().__init__(dim, dropout)
+        if causal:
+            raise NotImplementedError(
+                "LinformerAttention has no causal form: the sequence-axis "
+                "projection compresses the entire key/value sequence, so a "
+                "query cannot be restricted to attend only to earlier positions."
+            )
+        self.max_seq_len = max_seq_len
+        self.k = k
+        self.causal = causal
+
+        # Learned projections over the SEQUENCE axis: (max_seq_len, k). These
+        # compress K and V from length n (using the first n rows) down to k.
+        # They add 2 * max_seq_len * k learned parameters — Linformer is not
+        # parameter-free.
+        self.E = nn.Parameter(torch.empty(max_seq_len, k))
+        self.F = nn.Parameter(torch.empty(max_seq_len, k))
+        nn.init.xavier_uniform_(self.E)
+        nn.init.xavier_uniform_(self.F)
+
+    def forward(
+        self,
+        Q: torch.Tensor,
+        K: torch.Tensor,
+        V: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Compute Linformer low-rank attention.
+
+        Parameters
+        ----------
+        Q, K, V:
+            Query/key/value tensors of shape ``(batch, seq_len, dim)``.
+
+        Returns
+        -------
+        output:
+            Attention output of shape ``(batch, seq_len, dim)``.
+        attn:
+            Low-rank attention weights of shape ``(batch, seq_len, k)``.
+
+        Raises
+        ------
+        ValueError
+            If ``seq_len`` exceeds ``max_seq_len``; the fixed projection is
+            defined only for positions ``0..max_seq_len - 1``.
+        """
+        _, seq_len, _ = Q.shape
+        if seq_len > self.max_seq_len:
+            raise ValueError(
+                f"LinformerAttention received seq_len={seq_len} but is limited "
+                f"to max_seq_len={self.max_seq_len}: the learned sequence-axis "
+                f"projection has no rows for positions beyond max_seq_len, so "
+                f"this baseline is same-length-only."
+            )
+
+        # Use the first n rows of each projection: (n, k).
+        E_n = self.E[:seq_len]
+        F_n = self.F[:seq_len]
+
+        # Project K and V along the sequence (n) axis: (b, n, d) -> (b, k, d).
+        K_proj = torch.einsum("nk,bnd->bkd", E_n, K)
+        V_proj = torch.einsum("nk,bnd->bkd", F_n, V)
+
+        # Scaled dot-product against the compressed memory: (b, n, k).
+        scores = torch.matmul(Q, K_proj.transpose(-2, -1)) / math.sqrt(self.dim)
+        attn = F.softmax(scores, dim=-1)
+
+        # Weighted sum over the k compressed value slots: (b, n, d).
+        output = torch.matmul(attn, V_proj)
+        output = self.dropout(output)
+
+        return output, attn
+
+
+class LunaAttention(BaseAttention):
+    """Luna linear unified nested attention.
+
+    Implements the two-step "pack and unpack" nested attention of Luna
+    (Ma et al., 2021, "Luna: Linear Unified Nested Attention"). A fixed
+    number ``p`` of learned *pack* queries first summarize the input
+    sequence into a compact length-``p`` representation, and the real
+    queries then *unpack* that summary. Both steps are ordinary scaled
+    dot-product softmax attentions, but because the summary has fixed
+    length ``p`` neither step ever forms an ``n x n`` score matrix:
+
+        Step 1 (pack):   Yp = softmax(P @ K^T / sqrt(d)) @ V
+        Step 2 (unpack): out = softmax(Q @ Yp^T / sqrt(d)) @ Yp
+
+    Here ``P`` (shape ``(p, dim)``) is a learned sequence of pack queries
+    that is broadcast over the batch. Step 1 produces the packed context
+    ``Yp`` of shape ``(batch, p, dim)`` by having each of the ``p`` pack
+    queries attend over the whole sequence (softmax over the ``n`` keys).
+    Step 2 lets each of the ``n`` real queries attend over the ``p``
+    summary vectors (softmax over ``p``), using ``Yp`` as both keys and
+    values. This nesting is what makes Luna a landmark-style method: the
+    ``p`` pack queries act as ``p`` learned landmarks, directly comparable
+    to the Nyströmformer landmarks or the Linformer low-rank projections.
+
+    Unlike the parameter-free softmax baselines, Luna adds ``p * dim``
+    learned parameters (the pack-query sequence ``P``). The pack queries
+    are stored as an ``nn.Parameter`` and initialized from a normal
+    distribution with standard deviation ``dim ** -0.5``.
+
+    Complexity: O(batch * n * p * d), i.e. linear in the sequence length
+    ``n`` for a fixed number of pack queries ``p`` (never O(n^2)).
+    Memory: O(batch * n * p).
+
+    Parameters
+    ----------
+    dim:
+        Per-head embedding dimension ``d``.
+    dropout:
+        Dropout probability applied to the output.
+    num_pack:
+        Number of learned pack queries ``p`` (the length of the packed
+        summary and, equivalently, the number of landmarks). Defaults to
+        256.
+    causal:
+        If True, raise ``NotImplementedError``. Luna has no simple exact
+        causal form for the pack step: each pack query attends over the
+        entire sequence, so the packed summary ``Yp`` mixes information
+        from all positions and cannot be masked per query position without
+        changing the algorithm. A causal variant is intentionally not
+        provided here.
+
+    Notes
+    -----
+    The module is *not* parameter-free: it introduces ``p * dim`` learned
+    parameters via the pack-query sequence ``P``.
+    """
+
+    def __init__(
+        self,
+        dim: int,
+        dropout: float = 0.0,
+        num_pack: int = 256,
+        causal: bool = False,
+    ):
+        super().__init__(dim, dropout)
+        if causal:
+            raise NotImplementedError(
+                "LunaAttention does not support causal masking: each pack query "
+                "attends over the whole sequence, so the packed summary mixes all "
+                "positions and cannot be causally masked per query position without "
+                "changing the algorithm. Use a non-causal configuration."
+            )
+        self.num_pack = num_pack
+        self.causal = causal
+
+        # Learned pack-query sequence P of shape (p, dim). This is Luna's
+        # extra input sequence and the sole source of the module's
+        # p * dim added parameters. Broadcast over the batch at forward time.
+        pack_queries = torch.empty(num_pack, dim)
+        nn.init.normal_(pack_queries, std=dim**-0.5)
+        self.pack_queries = nn.Parameter(pack_queries)
+
+    def forward(
+        self,
+        Q: torch.Tensor,
+        K: torch.Tensor,
+        V: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Compute Luna nested (pack -> summary -> unpack) attention.
+
+        Parameters
+        ----------
+        Q, K, V:
+            Query/key/value tensors of shape ``(batch, seq_len, dim)``.
+
+        Returns
+        -------
+        output:
+            Attention output of shape ``(batch, seq_len, dim)``.
+        packed_context:
+            The length-``p`` packed summary ``Yp`` of shape
+            ``(batch, num_pack, dim)``, returned as a diagnostic.
+        """
+        batch, _, _ = Q.shape
+        scale = 1.0 / math.sqrt(self.dim)
+
+        # Broadcast the learned pack queries over the batch: (batch, p, dim).
+        P = self.pack_queries.unsqueeze(0).expand(batch, -1, -1)
+
+        # Step 1 (pack): the p pack queries attend over the whole sequence.
+        # scores1: (batch, p, n), softmax over the n keys.
+        scores1 = torch.matmul(P, K.transpose(-2, -1)) * scale
+        attn1 = F.softmax(scores1, dim=-1)
+        packed_context = torch.matmul(attn1, V)  # (batch, p, dim) == Yp
+
+        # Step 2 (unpack): the real queries attend over the p-vector summary,
+        # using Yp as both keys and values. scores2: (batch, n, p), softmax
+        # over the p summary vectors.
+        scores2 = torch.matmul(Q, packed_context.transpose(-2, -1)) * scale
+        attn2 = F.softmax(scores2, dim=-1)
+        output = torch.matmul(attn2, packed_context)  # (batch, n, dim)
+
+        output = self.dropout(output)
+
+        return output, packed_context
+
+
 # Convenient alias
 EfficientAttention = PiecewiseAttention
 
@@ -715,6 +1229,9 @@ __all__ = [
     "StandardAttention",
     "LinearAttention",
     "PerformerAttention",
+    "NystromformerAttention",
+    "LinformerAttention",
+    "LunaAttention",
     "PiecewiseAttention",
     "EfficientAttention",
 ]
