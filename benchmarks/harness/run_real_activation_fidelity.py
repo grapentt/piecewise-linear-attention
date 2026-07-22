@@ -81,6 +81,13 @@ M_PERF512 = "performer_M512"
 M_NYS64 = "nystrom_L64"
 M_NYS256 = "nystrom_L256"
 
+# Reduced-rank (query-residual low-rank) build of the m=64 anchor operator. The
+# ``95`` is the retained-variance threshold. Opt-in (``--with-reduced``): it is an
+# approximate build whose accuracy gate is "rel-err ≤ dense m=64 and still beats
+# the best baseline", so it is compared head-to-head with M_PW64, not shipped by
+# default in the sweep.
+M_PW64_RED95 = "piecewise_kmeans_m64_reduced95"
+
 PIECEWISE_METHODS = [M_PW1, M_PW4, M_PW16, M_PW64]
 PIECEWISE_M = {M_PW1: 1, M_PW4: 4, M_PW16: 16, M_PW64: 64}
 BASELINE_METHODS = [M_PERF256, M_PERF512, M_NYS64, M_NYS256]
@@ -250,6 +257,30 @@ def build_methods(dim, device):
         M_NYS256: build_attention("nystromformer", dim=dim, num_landmarks=256, pinv_iterations=6),
     }
     return {k: v.to(device) for k, v in methods.items()}
+
+
+def add_reduced_method(methods, dim, device, threshold=0.95):
+    """Add the opt-in reduced-rank m=64 comparator to a ``build_methods`` dict.
+
+    Same anchor count and k-means config as ``M_PW64`` but with the query-residual
+    low-rank build (``build_reduced_d=threshold``), so its error vs exact softmax is
+    directly comparable to the dense m=64 point.
+    """
+    methods[M_PW64_RED95] = build_attention(
+        "piecewise_kmeans", dim=dim, num_anchors=64, kmeans_iters=3,
+        build_reduced_d=threshold,
+    ).to(device)
+    return methods
+
+
+def _build_all_methods(dim, device, method_names):
+    """Build the module dict for exactly ``method_names`` (adds the reduced
+    comparator on demand). Kept separate from ``build_methods`` so the default
+    sweep is unchanged when the opt-in reduced method is not requested."""
+    methods = build_methods(dim, device)
+    if M_PW64_RED95 in method_names and M_PW64_RED95 not in methods:
+        add_reduced_method(methods, dim, device)
+    return methods
 
 
 # Piecewise m>=16 materializes (B·H, m, n, d) intermediates; force a single
@@ -476,17 +507,19 @@ def _reshape_equivalence_ok(block, dim, device, tol=1e-3):
 
 
 # --- Grid + verdict. ----------------------------------------------------------
-def run_grid(blocks, model_id, dim, layers, lengths, device, batch_heads_cap):
+def run_grid(blocks, model_id, dim, layers, lengths, device, batch_heads_cap,
+             method_names=None):
     rows = []
+    method_names = method_names or METHOD_NAMES
     keys = [(n, L) for n in lengths for L in layers if (n, L) in blocks]
     for (seq_len, layer) in keys:
         block = blocks[(seq_len, layer)]
         Qf, Kf, Vf = block["Q"], block["K"], block["V"]
-        for method in METHOD_NAMES:
+        for method in method_names:
             cap = _batch_heads_cap(method, seq_len, batch_heads_cap)
             bh = min(cap, Qf.shape[0])
             Q, K, V = Qf[:bh].to(device), Kf[:bh].to(device), Vf[:bh].to(device)
-            module = build_methods(dim, device)[method]
+            module = _build_all_methods(dim, device, method_names)[method]
             skipped = False
             try:
                 with torch.no_grad():
@@ -876,7 +909,18 @@ def main(argv=None):
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--out", type=str, default=None)
     parser.add_argument("--smoke", action="store_true")
+    parser.add_argument(
+        "--with-reduced", action="store_true",
+        help="Also run the opt-in reduced-rank m=64 comparator "
+             f"({M_PW64_RED95}) for the query-residual low-rank accuracy gate.",
+    )
     args = parser.parse_args(argv)
+
+    # The default sweep is unchanged; the reduced comparator is appended only when
+    # explicitly requested, so its opt-in accuracy gate never perturbs baselines.
+    active_methods = list(METHOD_NAMES)
+    if args.with_reduced:
+        active_methods.append(M_PW64_RED95)
 
     device = get_device(args.device)
     set_seed(args.seed)
@@ -901,7 +945,8 @@ def main(argv=None):
                 "dispersion": dmean, "per_span_dispersion_mean": dmean,
                 "kurtosis": excess_kurtosis(Q),
             }
-        rows = run_grid(blocks, "synthetic", dim, [2], list(smoke_lengths), device, batch_heads_cap=2)
+        rows = run_grid(blocks, "synthetic", dim, [2], list(smoke_lengths), device,
+                        batch_heads_cap=2, method_names=active_methods)
         assert rows, "smoke produced no rows"
         assert all(r["skipped"] or r["rel_err_mean"] >= 0.0 for r in rows)
         metrics = compute_verdict(rows, list(smoke_lengths))
@@ -946,7 +991,7 @@ def main(argv=None):
                     tiling_inflated = False
 
         rows = run_grid(blocks, model_id, dim, eff_layers, args.lengths, device,
-                        args.batch_heads_cap)
+                        args.batch_heads_cap, method_names=active_methods)
         all_rows.extend(rows)
         environments.append({
             "model_id": model_id, "attn_dim": dim, "layers": eff_layers,

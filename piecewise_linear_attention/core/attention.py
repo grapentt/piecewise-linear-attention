@@ -388,6 +388,10 @@ class PiecewiseAttention(BaseAttention):
     Complexity: O(batch * n * d²) for both modes
     """
 
+    # Minimum cluster size for estimating a query-residual subspace in the
+    # reduced-rank build; smaller clusters fall back to the exact dense M_j.
+    _MIN_CLUSTER = 8
+
     def __init__(
         self,
         dim: int,
@@ -399,6 +403,7 @@ class PiecewiseAttention(BaseAttention):
         anchor_strategy: Optional["AnchorStrategy"] = None,
         diagonal_only: bool = False,
         build_topp: Optional[float] = None,
+        build_reduced_d: Optional[float] = None,
     ):
         """Initialize piecewise attention.
 
@@ -458,6 +463,36 @@ class PiecewiseAttention(BaseAttention):
                            self-guards to the dense build. The median anchor's nucleus
                            is much smaller, so a *per-anchor* (ragged) cap could still
                            help — that is a separate, unimplemented build path.
+            build_reduced_d: Optional reduced-rank truncation of the multi-anchor
+                           Jacobian build along the **query-residual** axis. When
+                           ``None`` (default) each ``M_j`` is built as the full
+                           ``(dim, dim)`` operator (exact). When set to a variance
+                           threshold ``p`` in ``(0, 1]`` (e.g. ``0.95``), it exploits
+                           that ``M_j`` is only ever consumed as ``M_j·Δq`` where
+                           ``Δq = q − a_j``: within a k-means cluster the residuals
+                           ``Δq`` span a low-rank subspace, so ``M_j`` is built only on
+                           the ``d′_j`` directions that reach cumulative variance ``p``
+                           (per-anchor SVD of the residuals), giving ``M_j^red`` of shape
+                           ``(dim, d′_j)`` at build cost ``n·dim·d′_j`` instead of
+                           ``n·dim²``. The apply becomes
+                           ``M_j^red @ (R_jᵀ Δq)``. Only ``M_j`` is approximated: the
+                           zeroth-order anchor value ``o_j`` and the rank-1 ``wk_j``
+                           term stay exact.
+
+                           Self-guarding — it trades speed, never accuracy: any anchor
+                           whose ``d′_j`` is not meaningfully below ``dim`` (``> 0.5·dim``),
+                           any cluster too small to estimate a subspace, and any SVD
+                           failure all fall back to the exact dense ``M_j`` (identity
+                           basis). As ``p → 1`` the retained subspace grows to the full
+                           residual span and the output approaches the dense build (up to
+                           float reassociation).
+
+                           Mutually exclusive with ``build_topp`` (both truncate the
+                           Jacobian build, along different axes). Ignored in single-anchor
+                           and causal modes. Whether the reduced FLOPs convert to a
+                           wall-clock speedup depends on the per-anchor SVD cost, which is
+                           paid every forward when anchors are re-fit — profile before
+                           relying on it for speed.
         """
         super().__init__(dim, dropout)
         self.scale = scale
@@ -466,6 +501,14 @@ class PiecewiseAttention(BaseAttention):
         if build_topp is not None and not (0.0 < build_topp <= 1.0):
             raise ValueError(f"build_topp must be in (0, 1], got {build_topp}")
         self.build_topp = build_topp
+        if build_reduced_d is not None and not (0.0 < build_reduced_d <= 1.0):
+            raise ValueError(f"build_reduced_d must be in (0, 1], got {build_reduced_d}")
+        if build_reduced_d is not None and build_topp is not None:
+            raise ValueError(
+                "build_reduced_d and build_topp are mutually exclusive; both truncate "
+                "the Jacobian build (along the query-residual and key axes respectively)."
+            )
+        self.build_reduced_d = build_reduced_d
         self.causal_pseudo_query = causal_pseudo_query
         if causal_pseudo_query not in ("mean", "first"):
             raise ValueError(
@@ -624,6 +667,128 @@ class PiecewiseAttention(BaseAttention):
         )  # (b, m, dim, dim)
         return weighted_k, second_moment
 
+    def _build_jacobian_factors_reduced(
+        self,
+        alpha: torch.Tensor,
+        V: torch.Tensor,
+        K: torch.Tensor,
+        Q: torch.Tensor,
+        anchors: torch.Tensor,
+        assign: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Build a reduced-rank second-moment operator on the query-residual axis.
+
+        ``M_j = Σ_n α_{jn} v_n k_nᵀ`` is only ever consumed as ``M_j·Δq`` with
+        ``Δq = q_i − a_j`` for queries assigned to anchor ``j``. Within a k-means
+        cluster the residuals ``Δq`` span a low-rank subspace, so ``M_j`` need only
+        be built on that subspace. For each anchor we take the residuals of its
+        assigned queries, find an orthonormal basis ``R_j`` (right singular vectors)
+        for the smallest subspace reaching cumulative variance ``self.build_reduced_d``,
+        and build the reduced operator directly:
+
+            M_j^red = Σ_n α_{jn} v_n (R_jᵀ k_n)ᵀ,   shape (dim, d′_j)
+
+        at build cost ``n·dim·d′_j`` rather than ``n·dim²``. The apply reconstructs
+        ``M_j·Δq ≈ M_j^red @ (R_jᵀ Δq)`` — exact on the retained subspace, dropping
+        only the residual tail beyond ``d′_j`` (Eckart–Young bounds its energy by the
+        discarded ``1 − p`` variance share).
+
+        Self-guarding — trades speed, never accuracy. Three cases fall back to the
+        exact dense ``M_j`` via an **identity basis** ``R_j = I`` with ``d′_j = dim``
+        (so the padded apply reproduces the dense operator on that anchor): a cluster
+        with fewer than ``_MIN_CLUSTER`` members (too few to estimate a subspace),
+        an SVD that fails to converge, and an anchor whose required rank is not
+        meaningfully below ``dim`` (``d′_j > 0.5·dim``).
+
+        The per-anchor bases have ragged widths ``d′_j``; they are padded to a single
+        batched width ``d′_max = max_j d′_j`` so the downstream build and apply stay one
+        matmul each (mirroring the capacity-bucket apply). Anchors narrower than
+        ``d′_max`` have their surplus columns zeroed and contribute nothing.
+
+        The SVD (subspace estimation) is non-differentiable and runs under
+        ``torch.no_grad`` like the nearest-anchor assignment; gradients still flow
+        through the build and apply w.r.t. ``Q, K, V`` because ``R`` and ``M_red`` enter
+        the returned tensors as constants (the basis, not its derivative, is used).
+
+        Args:
+            alpha: Per-anchor softmax weights, shape (batch, m, seq_len).
+            V: Value tensor, shape (batch, seq_len, dim).
+            K: Key tensor, shape (batch, seq_len, dim).
+            Q: Query tensor, shape (batch, seq_len, dim).
+            anchors: Anchor tensor, shape (batch, m, dim).
+            assign: Nearest-anchor assignment, shape (batch, seq_len).
+
+        Returns:
+            R: Per-anchor query-residual bases, shape (batch, m, dim, d′_max),
+                zero-padded past each anchor's own d′_j (identity-padded for fallbacks).
+            M_red: Reduced second-moment operators, shape (batch, m, dim, d′_max),
+                zero-padded to d′_max.
+            dprime: Per-anchor retained rank d′_j, shape (batch, m), integer.
+        """
+        b, m, n = alpha.shape
+        dim = V.shape[-1]
+        p = self.build_reduced_d
+        device = V.device
+
+        eye = torch.eye(dim, device=device, dtype=torch.float32)
+
+        # First pass (fp32, no grad): per-anchor residual SVD → basis R_j and rank d′_j.
+        # Collected as python lists of (dim, d′_j) tensors, then padded to d′_max.
+        R_list = []  # length b*m, each (dim, d′_j)
+        dprime = torch.empty(b, m, dtype=torch.long, device=device)
+        with torch.no_grad():
+            Qf = Q.float()
+            Af = anchors.float()
+            for bi in range(b):
+                for j in range(m):
+                    mask = assign[bi] == j
+                    cnt = int(mask.sum().item())
+                    fallback = cnt < self._MIN_CLUSTER
+                    if not fallback:
+                        dq = Qf[bi][mask] - Af[bi, j]  # (cnt, dim)
+                        try:
+                            svals = torch.linalg.svdvals(dq)  # (min(cnt, dim),)
+                        except Exception:
+                            fallback = True
+                    if not fallback:
+                        energy = svals.double() ** 2
+                        total = energy.sum().clamp_min(1e-12)
+                        cum = (torch.cumsum(energy, dim=0) / total).cpu()
+                        dpr = int(
+                            torch.searchsorted(
+                                cum, torch.tensor(p, dtype=cum.dtype)
+                            ).item()
+                        ) + 1
+                        dpr = min(dpr, int(svals.numel()))
+                        # Self-guard: not meaningfully low-rank → exact dense fallback.
+                        if dpr > 0.5 * dim:
+                            fallback = True
+                    if fallback:
+                        dprime[bi, j] = dim
+                        R_list.append(eye)  # identity basis → exact dense M_j
+                        continue
+                    # Right singular vectors of the residuals as basis columns.
+                    _, _, Vh = torch.linalg.svd(dq, full_matrices=False)
+                    dprime[bi, j] = dpr
+                    R_list.append(Vh[:dpr].mH.contiguous())  # (dim, dpr)
+
+        dprime_max = int(dprime.max().item())
+
+        # Pad each basis to (dim, dprime_max) and stack to (b, m, dim, dprime_max).
+        R = torch.zeros(b, m, dim, dprime_max, device=device, dtype=V.dtype)
+        for idx, Rj in enumerate(R_list):
+            bi, j = divmod(idx, m)
+            R[bi, j, :, : Rj.shape[1]] = Rj.to(V.dtype)
+
+        # Reduced build: project K into each anchor's subspace, then contract with
+        # α and V. M_red[b,j] = Σ_n α_{jn} v_n (R_jᵀ k_n)ᵀ. Projecting first keeps the
+        # contraction's inner dim at dprime_max ≪ dim.
+        #   Kr[b,j,n,r] = Σ_e K[b,n,e] R[b,j,e,r]           (b, m, n, dprime_max)
+        #   M_red[b,j,d,r] = Σ_n α[b,j,n] V[b,n,d] Kr[b,j,n,r]
+        Kr = torch.einsum("bne,bmer->bmnr", K, R)  # (b, m, n, dprime_max)
+        M_red = torch.einsum("bmn,bnd,bmnr->bmdr", alpha, V, Kr)  # (b, m, dim, dprime_max)
+        return R, M_red, dprime
+
     def _compute_multi_anchor(
         self,
         Q: torch.Tensor,
@@ -684,7 +849,30 @@ class PiecewiseAttention(BaseAttention):
         # Zeroth-order term A(a_j): always built from ALL keys, so the anchor
         # value is exact even when the Jacobian factors are top-p truncated.
         out_anchor = torch.einsum("bmn,bnd->bmd", alpha, V)  # (batch, m, dim)
-        if self.build_topp is None:
+
+        # Hard-assign each query to its nearest anchor (non-differentiable);
+        # gradients still flow through the expansion below w.r.t. Q, K, V.
+        # cdist has no half-precision kernel on some backends, so the distance
+        # is computed in float; the result is an integer index, so the upcast is
+        # free and does not affect the fp16 expansion below. Computed here (before
+        # the build) because the reduced-rank build needs the per-anchor query
+        # membership to estimate each cluster's residual subspace.
+        with torch.no_grad():
+            assign = torch.cdist(Q.float(), anchors.float()).argmin(dim=-1)  # (batch, seq_len)
+
+        # ``reduced`` flags the low-rank build path: the second-moment operator is
+        # factored as ``M_red @ Rᵀ`` (shapes (b, m, dim, d′) each) rather than a full
+        # (b, m, dim, dim) matrix, so the apply projects Δq through R before the matmul.
+        reduced = self.build_reduced_d is not None
+        R = None
+        if reduced:
+            # Reduced-rank build on the query-residual axis: M_j built only on the
+            # d′_j directions each cluster's Δq excites. weighted_k stays exact.
+            weighted_k = torch.einsum("bmn,bnd->bmd", alpha, K)  # (batch, m, dim)
+            R, second_moment, _dprime = self._build_jacobian_factors_reduced(
+                alpha, V, K, Q, anchors, assign
+            )  # R: (b, m, dim, d′_max), second_moment (M_red): (b, m, dim, d′_max)
+        elif self.build_topp is None:
             # Exact dense build of the Jacobian factors.
             weighted_k = torch.einsum("bmn,bnd->bmd", alpha, K)  # (batch, m, dim)
             # M_j = Σ_n α_{jn} v_n k_nᵀ, formed with α folded directly into the
@@ -702,14 +890,6 @@ class PiecewiseAttention(BaseAttention):
             # build_topp. Shrinks the build's sequence axis from n to t ≪ n when
             # α is peaked, and reverts to the full n (exact) when α is diffuse.
             weighted_k, second_moment = self._build_jacobian_factors_topp(alpha, V, K)
-
-        # Hard-assign each query to its nearest anchor (non-differentiable);
-        # gradients still flow through the expansion below w.r.t. Q, K, V.
-        # cdist has no half-precision kernel on some backends, so the distance
-        # is computed in float; the result is an integer index, so the upcast is
-        # free and does not affect the fp16 expansion below.
-        with torch.no_grad():
-            assign = torch.cdist(Q.float(), anchors.float()).argmin(dim=-1)  # (batch, seq_len)
 
         # Gather the m-free per-query factors along the anchor axis (cheap
         # O(seq_len · dim) gathers, never a (dim, dim) per-query object).
@@ -761,17 +941,38 @@ class PiecewiseAttention(BaseAttention):
         # (even 10×-imbalanced) k-means/stride assignments the bucket path wins,
         # so the guard stays inactive.
         if m * capacity > n * dim:
-            m_sel = torch.gather(
-                second_moment, 1, assign.view(b, n, 1, 1).expand(-1, -1, dim, dim)
-            )  # (batch, seq_len, dim, dim)
-            m_term = torch.einsum("bnde,bne->bnd", m_sel, delta)  # (batch, seq_len, dim)
+            if reduced:
+                # Direct per-query apply against the compact reduced factors:
+                # M_j·Δq ≈ M_red_j @ (R_jᵀ Δq). Gather both (dim, d′_max) factors
+                # per query — still smaller than a (dim, dim) gather since d′_max ≤ dim.
+                dpm = second_moment.shape[-1]
+                idx_dr = assign.view(b, n, 1, 1).expand(-1, -1, dim, dpm)
+                R_sel = torch.gather(R, 1, idx_dr)  # (b, n, dim, d′_max)
+                mred_sel = torch.gather(second_moment, 1, idx_dr)  # (b, n, dim, d′_max)
+                rq = torch.einsum("bner,bne->bnr", R_sel, delta)  # (b, n, d′_max)
+                m_term = torch.einsum("bndr,bnr->bnd", mred_sel, rq)  # (b, n, dim)
+            else:
+                m_sel = torch.gather(
+                    second_moment, 1, assign.view(b, n, 1, 1).expand(-1, -1, dim, dim)
+                )  # (batch, seq_len, dim, dim)
+                m_term = torch.einsum("bnde,bne->bnd", m_sel, delta)  # (batch, seq_len, dim)
         else:
             flat_d = flat.unsqueeze(-1).expand(-1, -1, dim)  # (batch, seq_len, dim)
             bucket = torch.zeros(b, m * capacity, dim, device=Q.device, dtype=Q.dtype)
             bucket.scatter_(1, flat_d, delta)  # place each Δq into its group slot
-            # dq @ Mᵀ computes (M @ dq) row-wise, so transpose the last two dims.
-            res = torch.matmul(bucket.view(b, m, capacity, dim), second_moment.transpose(-1, -2))
-            res = res.reshape(b, m * capacity, dim)
+            if reduced:
+                # Project each bucketed Δq into its anchor's subspace, then apply the
+                # reduced operator: M_j·Δq ≈ M_red_j @ (R_jᵀ Δq). Projection happens
+                # INSIDE the bucket (never per query), keeping the (dim, dim)-free
+                # memory discipline. R and M_red share the batched d′_max width.
+                bkt = bucket.view(b, m, capacity, dim)
+                rq = torch.matmul(bkt, R)  # (b, m, C, d′_max): Rᵀ Δq per query
+                res = torch.matmul(rq, second_moment.transpose(-1, -2))  # (b, m, C, dim)
+                res = res.reshape(b, m * capacity, dim)
+            else:
+                # dq @ Mᵀ computes (M @ dq) row-wise, so transpose the last two dims.
+                res = torch.matmul(bucket.view(b, m, capacity, dim), second_moment.transpose(-1, -2))
+                res = res.reshape(b, m * capacity, dim)
             m_term = res.gather(1, flat_d)  # (batch, seq_len, dim): M_{assign_i} @ Δq_i
 
         # Rank-1 term o_j·(wk_jᵀ Δq) without forming any (dim, dim) product.

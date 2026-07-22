@@ -1,0 +1,192 @@
+{
+  "config": {
+    "anchors": 64,
+    "batch": 8,
+    "benchmark": "reduced_build_profile",
+    "dim": 128,
+    "dtypes": [
+      "bf16",
+      "fp32"
+    ],
+    "lengths": [
+      1024,
+      2048,
+      4096
+    ],
+    "num_blobs": 32,
+    "repeats": 15,
+    "seed": 0,
+    "threshold": 0.95,
+    "warmup": 3
+  },
+  "environment": {
+    "device": "cuda",
+    "gpu": "NVIDIA A100 80GB PCIe",
+    "platform": "Linux-6.8.0-1059-azure-x86_64-with-glibc2.35",
+    "torch": "2.1.2+cu121"
+  },
+  "history": {
+    "metrics": {
+      "best_build_speedup": 0.0031998012345968913,
+      "best_forward_speedup": 0.00460852325721411,
+      "best_mem_ratio": 0.6839787212176498,
+      "max_flop_ceiling_ratio": 2.894955384751303,
+      "min_dprime_mean_frac": 0.345428466796875
+    },
+    "params": {
+      "anchors": 64,
+      "batch": 8,
+      "dim": 128,
+      "dtypes": [
+        "bf16",
+        "fp32"
+      ],
+      "lengths": [
+        1024,
+        2048,
+        4096
+      ],
+      "num_blobs": 32,
+      "repeats": 15,
+      "seed": 0,
+      "threshold": 0.95,
+      "warmup": 3
+    },
+    "rows": [
+      {
+        "anchors": 64,
+        "batch": 8,
+        "build_speedup": 0.0010761282449234478,
+        "dim": 128,
+        "dprime_max": 128,
+        "dprime_mean": 50.171875,
+        "dprime_mean_frac": 0.3919677734375,
+        "dprime_median": 23.0,
+        "dtype": "bfloat16",
+        "flop_ceiling_ratio": 2.551230146371847,
+        "forward_speedup": 0.0020819899289005093,
+        "mem_build_dense_bytes": 334829568,
+        "mem_build_reduced_bytes": 493729280,
+        "mem_ratio": 0.6781642927881449,
+        "seq_len": 1024,
+        "t_build_dense_s": 0.0008796160221099853,
+        "t_build_reduced_s": 0.8173895874023438,
+        "t_forward_dense_s": 0.0017059839963912964,
+        "t_forward_reduced_s": 0.8194006958007812
+      },
+      {
+        "anchors": 64,
+        "batch": 8,
+        "build_speedup": 0.0010279519068098124,
+        "dim": 128,
+        "dprime_max": 128,
+        "dprime_mean": 44.224609375,
+        "dprime_mean_frac": 0.3455047607421875,
+        "dprime_median": 33.0,
+        "dtype": "bfloat16",
+        "flop_ceiling_ratio": 2.894316124188491,
+        "forward_speedup": 0.0016810531768872072,
+        "mem_build_dense_bytes": 610670592,
+        "mem_build_reduced_bytes": 911364608,
+        "mem_ratio": 0.6700617805865027,
+        "seq_len": 2048,
+        "t_build_dense_s": 0.0015421439409255982,
+        "t_build_reduced_s": 1.500210205078125,
+        "t_forward_dense_s": 0.0025210878849029543,
+        "t_forward_reduced_s": 1.4997073974609374
+      },
+      {
+        "anchors": 64,
+        "batch": 8,
+        "build_speedup": 0.0014005749144322102,
+        "dim": 128,
+        "dprime_max": 128,
+        "dprime_mean": 64.419921875,
+        "dprime_mean_frac": 0.5032806396484375,
+        "dprime_median": 47.0,
+        "dtype": "bfloat16",
+        "flop_ceiling_ratio": 1.9869629809295697,
+        "forward_speedup": 0.0019523674974278248,
+        "mem_build_dense_bytes": 1162352640,
+        "mem_build_reduced_bytes": 1739761152,
+        "mem_ratio": 0.6681104694536828,
+        "seq_len": 4096,
+        "t_build_dense_s": 0.002879487991333008,
+        "t_build_reduced_s": 2.055932861328125,
+        "t_forward_dense_s": 0.004021247863769531,
+        "t_forward_reduced_s": 2.059677734375
+      },
+      {
+        "anchors": 64,
+        "batch": 8,
+        "build_speedup": 0.0022054412794635637,
+        "dim": 128,
+        "dprime_max": 128,
+        "dprime_mean": 50.162109375,
+        "dprime_mean_frac": 0.3918914794921875,
+        "dprime_median": 23.0,
+        "dtype": "float32",
+        "flop_ceiling_ratio": 2.551726823190437,
+        "forward_speedup": 0.0033505475409596856,
+        "mem_build_dense_bytes": 661067776,
+        "mem_build_reduced_bytes": 966503424,
+        "mem_ratio": 0.6839787212176498,
+        "seq_len": 1024,
+        "t_build_dense_s": 0.0017920000553131104,
+        "t_build_reduced_s": 0.8125358276367187,
+        "t_forward_dense_s": 0.0027258880138397216,
+        "t_forward_reduced_s": 0.81356494140625
+      },
+      {
+        "anchors": 64,
+        "batch": 8,
+        "build_speedup": 0.0022364905106173187,
+        "dim": 128,
+        "dprime_max": 128,
+        "dprime_mean": 44.21484375,
+        "dprime_mean_frac": 0.345428466796875,
+        "dprime_median": 33.0,
+        "dtype": "float32",
+        "flop_ceiling_ratio": 2.894955384751303,
+        "forward_speedup": 0.0032940293029383528,
+        "mem_build_dense_bytes": 1212684288,
+        "mem_build_reduced_bytes": 1789937664,
+        "mem_ratio": 0.6775008495491383,
+        "seq_len": 2048,
+        "t_build_dense_s": 0.0033474559783935546,
+        "t_build_reduced_s": 1.4967449951171874,
+        "t_forward_dense_s": 0.004934656143188477,
+        "t_forward_reduced_s": 1.498060791015625
+      },
+      {
+        "anchors": 64,
+        "batch": 8,
+        "build_speedup": 0.0031998012345968913,
+        "dim": 128,
+        "dprime_max": 128,
+        "dprime_mean": 64.72265625,
+        "dprime_mean_frac": 0.505645751953125,
+        "dprime_median": 47.0,
+        "dtype": "float32",
+        "flop_ceiling_ratio": 1.97766914116724,
+        "forward_speedup": 0.00460852325721411,
+        "mem_build_dense_bytes": 2315917312,
+        "mem_build_reduced_bytes": 3429882880,
+        "mem_ratio": 0.6752176074303738,
+        "seq_len": 4096,
+        "t_build_dense_s": 0.0065372161865234375,
+        "t_build_reduced_s": 2.0430069580078123,
+        "t_forward_dense_s": 0.00942796802520752,
+        "t_forward_reduced_s": 2.0457677001953125
+      }
+    ]
+  },
+  "metrics": {
+    "best_build_speedup": 0.0031998012345968913,
+    "best_forward_speedup": 0.00460852325721411,
+    "best_mem_ratio": 0.6839787212176498,
+    "max_flop_ceiling_ratio": 2.894955384751303,
+    "min_dprime_mean_frac": 0.345428466796875
+  },
+  "schema_version": 1
+}
