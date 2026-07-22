@@ -203,9 +203,24 @@ def _build_piecewise(
 
 @register_attention("piecewise_kmeans")
 def _build_piecewise_kmeans(
-    *, dim, dropout, causal, scale=True, num_anchors=4, kmeans_iters=3, **_ignored
+    *,
+    dim,
+    dropout,
+    causal,
+    scale=True,
+    num_anchors=4,
+    kmeans_iters=3,
+    build_topp=None,
+    build_reduced_d=None,
+    **_ignored,
 ) -> BaseAttention:
-    """Multi-anchor piecewise attention with k-means-selected anchors."""
+    """Multi-anchor piecewise attention with k-means-selected anchors.
+
+    ``build_topp`` and ``build_reduced_d`` are optional Jacobian-build
+    truncations (nucleus / query-residual low-rank); both default to ``None``
+    (exact dense build) and are mutually exclusive. Exposing them by name here
+    makes them loggable as run configuration.
+    """
     from .anchors import KMeansAnchor
 
     return PiecewiseAttention(
@@ -214,6 +229,8 @@ def _build_piecewise_kmeans(
         scale=scale,
         causal=causal,
         anchor_strategy=KMeansAnchor(k=num_anchors, iters=kmeans_iters),
+        build_topp=build_topp,
+        build_reduced_d=build_reduced_d,
     )
 
 
