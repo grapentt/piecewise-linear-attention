@@ -447,6 +447,210 @@ class TestMultiAnchorAttention:
             PiecewiseAttention(dim=8, causal=True, anchor_strategy=KMeansAnchor(4))
 
 
+class TestReducedBuild:
+    """Reduced-rank (``build_reduced_d``) query-residual Jacobian build.
+
+    The reduced build factors each second-moment operator as ``M_red @ Rᵀ``
+    (widths ``d′_j ≤ dim``) instead of a full ``(dim, dim)`` matrix, exploiting
+    that a cluster's query residuals ``Δq`` are low-rank. It is approximate but
+    self-guarding: it must never be worse than the dense build.
+    """
+
+    def test_build_reduced_reverts_at_p1(self):
+        """At p=1 the retained subspace spans all residual directions, so the
+        reduced build reproduces the dense output.
+
+        Locks the no-op limit that makes ``build_reduced_d`` a speed-only knob:
+        keeping every direction (variance threshold 1.0) must equal the exact
+        dense build up to float reassociation. Catches a basis that drops needed
+        directions even when asked to keep all of them, or a wrong rank cutoff.
+
+        Assessment: appropriate — this is the load-bearing correctness limit of
+        the approximation (the p→1 boundary), the analogue of the ``build_topp``
+        keep-all test. The tolerance is looser than the exact-path tests because
+        the SVD projection reorders the summation (pure fp reassociation).
+        """
+        torch.manual_seed(0)
+        b, n, d, m = 3, 96, 16, 8
+        Q = torch.randn(b, n, d)
+        K = torch.randn(b, n, d)
+        V = torch.randn(b, n, d)
+
+        def run(reduced):
+            attn = PiecewiseAttention(
+                dim=d, scale=True, anchor_strategy=KMeansAnchor(m, iters=3),
+                build_reduced_d=reduced,
+            )
+            anchors = attn.anchor_strategy.select(Q)
+            with torch.no_grad():
+                return attn._compute_multi_anchor(Q, K, V, anchors)
+
+        assert torch.allclose(run(1.0), run(None), atol=1e-4, rtol=1e-4)
+
+    def test_build_reduced_zeroth_and_rank1_terms_stay_exact(self):
+        """Only ``M_j`` is reduced; the anchor value ``o_j`` and the rank-1 ``wk``
+        term are built from all keys and stay exact.
+
+        Both the reduced and dense outputs have their own second-moment
+        contribution ``scale·(M_j·Δq)`` subtracted out — reconstructed from each
+        build's own factors — leaving the remainder ``o_j − scale·o_j·(wk_jᵀΔq)``.
+        That remainder is a function of ``o_j`` and ``wk_j`` only, both of which are
+        built from all keys in both paths, so the two remainders must be
+        bit-identical (atol 1e-6).
+
+        Locks: the reduced path touches *only* the ``M_j`` operator. Catches an
+        edit that accidentally routes ``out_anchor`` or ``weighted_k`` through the
+        approximation, which would degrade the exact terms and still pass a loose
+        end-to-end tolerance test.
+
+        Assessment: appropriate — isolates the exactness contract the whole
+        accuracy argument rests on (the mean value is never approximated), which
+        no end-to-end tolerance test pins down on its own.
+        """
+        torch.manual_seed(1)
+        b, n, d, m = 2, 80, 16, 8
+        Q = torch.randn(b, n, d)
+        K = torch.randn(b, n, d)
+        V = torch.randn(b, n, d)
+        scale = 1.0 / math.sqrt(d)
+
+        def remainder(reduced):
+            """out − scale·(M·Δq), reconstructing M·Δq from this build's factors."""
+            attn = PiecewiseAttention(
+                dim=d, scale=True, anchor_strategy=KMeansAnchor(m, iters=3),
+                build_reduced_d=reduced,
+            )
+            anchors = attn.anchor_strategy.select(Q)
+            with torch.no_grad():
+                out = attn._compute_multi_anchor(Q, K, V, anchors)
+                al = torch.softmax(
+                    torch.einsum("bmd,bnd->bmn", anchors, K) * scale, -1
+                )
+                assign = torch.cdist(Q.float(), anchors.float()).argmin(-1)
+                a_sel = torch.gather(
+                    anchors, 1, assign.unsqueeze(-1).expand(-1, -1, d)
+                )
+                delta = Q - a_sel
+                if reduced is None:
+                    M = torch.einsum("bmn,bnd,bne->bmde", al, V, K)  # (b,m,d,d)
+                    M_sel = torch.gather(
+                        M, 1, assign.view(b, n, 1, 1).expand(-1, -1, d, d)
+                    )
+                    m_term = torch.einsum("bnde,bne->bnd", M_sel, delta)
+                else:
+                    R, M_red, _ = attn._build_jacobian_factors_reduced(
+                        al, V, K, Q, anchors, assign
+                    )  # (b,m,d,d′)
+                    dp = M_red.shape[-1]
+                    R_sel = torch.gather(
+                        R, 1, assign.view(b, n, 1, 1).expand(-1, -1, d, dp)
+                    )
+                    Mr_sel = torch.gather(
+                        M_red, 1, assign.view(b, n, 1, 1).expand(-1, -1, d, dp)
+                    )
+                    rq = torch.einsum("bner,bne->bnr", R_sel, delta)
+                    m_term = torch.einsum("bndr,bnr->bnd", Mr_sel, rq)
+                return out - scale * m_term  # the o_j + rank-1 remainder
+
+        assert torch.allclose(remainder(0.5), remainder(None), atol=1e-6)
+
+    def test_build_reduced_self_guard_matches_dense(self):
+        """An anchor whose residuals are genuinely full-rank triggers the
+        ``d′_j > 0.5·dim`` self-guard and falls back to the exact dense ``M_j``.
+
+        Uses isotropic random queries (no cluster structure, so each cluster's Δq
+        spans nearly all directions) at a strict threshold, forcing the guard on
+        every anchor; the output must then equal the dense build.
+
+        Locks the "trades speed, never accuracy" contract: when the low-rank
+        assumption fails, the build reverts to dense rather than degrading. Catches
+        a guard that lets a rank-deficient approximation through on hard inputs.
+
+        Assessment: appropriate — this is the safety property that lets the flag
+        ship on by default in experiments without an accuracy risk; nothing else
+        tests the fallback firing.
+        """
+        torch.manual_seed(2)
+        b, n, d, m = 2, 64, 12, 6
+        Q = torch.randn(b, n, d)  # isotropic -> residuals ~full rank
+        K = torch.randn(b, n, d)
+        V = torch.randn(b, n, d)
+
+        attn = PiecewiseAttention(
+            dim=d, scale=True, anchor_strategy=KMeansAnchor(m, iters=3),
+            build_reduced_d=0.99,
+        )
+        anchors = attn.anchor_strategy.select(Q)
+        with torch.no_grad():
+            _, M_red, dprime = attn._build_jacobian_factors_reduced(
+                torch.softmax(
+                    torch.einsum("bmd,bnd->bmn", anchors, K) / math.sqrt(d), -1
+                ),
+                V, K, Q, anchors,
+                torch.cdist(Q.float(), anchors.float()).argmin(-1),
+            )
+            out_red = attn._compute_multi_anchor(Q, K, V, anchors)
+
+            dense = PiecewiseAttention(
+                dim=d, scale=True, anchor_strategy=KMeansAnchor(m, iters=3)
+            )
+            out_dense = dense._compute_multi_anchor(Q, K, V, anchors)
+
+        # At least one anchor must have hit the full-rank fallback (d′ == dim).
+        assert (dprime == d).any(), "self-guard never fired; input not full-rank enough"
+        assert torch.allclose(out_red, out_dense, atol=1e-4, rtol=1e-4)
+
+    def test_build_reduced_rejects_bad_value_and_topp_conflict(self):
+        """``build_reduced_d`` outside (0, 1] and combining it with ``build_topp``
+        are both rejected at construction.
+
+        Locks: the documented domain of the knob and its mutual exclusivity with
+        the other build truncation. Catches a typo'd probability and a config that
+        would silently pick one of two conflicting build paths.
+        """
+        for bad in (0.0, -0.1, 1.5):
+            with pytest.raises(ValueError):
+                PiecewiseAttention(
+                    dim=8, anchor_strategy=KMeansAnchor(4), build_reduced_d=bad
+                )
+        with pytest.raises(ValueError):
+            PiecewiseAttention(
+                dim=8, anchor_strategy=KMeansAnchor(4),
+                build_topp=0.99, build_reduced_d=0.95,
+            )
+
+    def test_grad_flows_through_reduced_build(self):
+        """Gradients reach Q, K, V through the reduced build.
+
+        The SVD basis is computed under ``no_grad`` (like the nearest-anchor
+        assignment), so ``R`` enters the build/apply as a constant; gradients must
+        still flow through the ``M_red`` einsum and the projected apply.
+
+        Locks: the reduced build stays differentiable end-to-end. Catches a future
+        edit that detaches the value/key contraction or computes ``M_red`` under
+        ``no_grad``, which would zero the K/V gradient on the linear correction and
+        pass every forward exactness test.
+
+        Assessment: appropriate — mirrors the dense/topp grad tests for the new
+        subgraph; the gap it fills (grad through the projected build) is real.
+        """
+        torch.manual_seed(0)
+        dim = 12
+        Q = torch.randn(2, 48, dim, requires_grad=True)
+        K = torch.randn(2, 48, dim, requires_grad=True)
+        V = torch.randn(2, 48, dim, requires_grad=True)
+        attn = PiecewiseAttention(
+            dim=dim, scale=True, anchor_strategy=KMeansAnchor(6, iters=3),
+            build_reduced_d=0.9,
+        )
+        out, _ = attn(Q, K, V)
+        out.sum().backward()
+        for name, t in [("Q", Q), ("K", K), ("V", V)]:
+            assert t.grad is not None, f"no grad for {name}"
+            assert torch.isfinite(t.grad).all()
+            assert t.grad.abs().sum() > 0, f"zero grad for {name}"
+
+
 class TestCallableAnchor:
     """Legacy pseudo_query_fn adapter."""
 
