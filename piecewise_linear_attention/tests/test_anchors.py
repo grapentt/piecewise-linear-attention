@@ -259,6 +259,63 @@ class TestMultiAnchorAttention:
             assert t.grad is not None, f"no grad for {name}"
             assert torch.isfinite(t.grad).all()
 
+    def test_build_topp_reverts_when_diffuse(self):
+        """Top-p build reproduces the dense build at p=1 and on diffuse weights.
+
+        Locks the two invariants that make ``build_topp`` a speed-only knob:
+          (a) ``build_topp=1.0`` keeps every key, so the truncated build equals
+              the exact dense build (up to float reassociation); and
+          (b) when the anchor softmax is diffuse (near-uniform), no key can be
+              dropped without losing mass, so the nucleus grows back to all keys
+              and even an aggressive ``p=0.999`` reverts to the dense output.
+
+        Catches: a truncation that fires when it must not — dropping tail mass on
+        a flat distribution (which would silently degrade accuracy exactly where
+        the approximation has no headroom), an off-by-one that excludes the
+        threshold-crossing key, or a wrong unrenormalized-vs-renormalized sum.
+
+        Assessment: appropriate. This is the load-bearing correctness property of
+        the approximation (it must never hurt a diffuse case), tested with one
+        p=1 invariant plus the diffuse revert — not per-p over-testing. The
+        peaked-regime *speedup* is a benchmark concern, not a unit-test assertion,
+        so it is deliberately not asserted here.
+        """
+        torch.manual_seed(0)
+        b, n, d, m = 3, 128, 16, 4
+        Q = torch.randn(b, n, d)
+        V = torch.randn(b, n, d)
+
+        def run(K, topp):
+            attn = PiecewiseAttention(
+                dim=d, scale=True, anchor_strategy=StrideAnchor(m), build_topp=topp
+            )
+            with torch.no_grad():
+                out, _ = attn(Q, K, V)
+            return out
+
+        # (a) p=1.0 keeps all keys regardless of how peaked the weights are. The
+        # top-p path sorts and gathers keys, so the summation order differs from
+        # the dense contraction — the mismatch is pure fp32 reassociation, scaled
+        # up here by the deliberately large-magnitude peaked weights, so the
+        # tolerance is looser than the bit-identical exact-path tests.
+        K_peaked = 5.0 * torch.randn(b, n, d)
+        assert torch.allclose(run(K_peaked, 1.0), run(K_peaked, None), atol=1e-4, rtol=1e-4)
+
+        # (b) diffuse weights force the nucleus back to the full sequence, so an
+        # aggressive p still reverts to the exact dense output.
+        K_diffuse = 0.01 * torch.randn(b, n, d)
+        assert torch.allclose(run(K_diffuse, 0.999), run(K_diffuse, None), atol=1e-5)
+
+    def test_build_topp_rejects_bad_value(self):
+        """build_topp outside (0, 1] is rejected at construction.
+
+        Locks: the documented domain of the knob. Catches a typo'd probability
+        (e.g. a percentage like ``99``) silently degrading the build.
+        """
+        for bad in (0.0, -0.1, 1.5):
+            with pytest.raises(ValueError):
+                PiecewiseAttention(dim=8, anchor_strategy=StrideAnchor(4), build_topp=bad)
+
     def test_multi_anchor_rejects_causal(self):
         """Multi-anchor + causal is rejected at construction.
 
