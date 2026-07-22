@@ -9,13 +9,16 @@ points.
 ## One-line state
 
 Piecewise attention is uniformly faster than standard softmax at long context.
-At a single anchor (`m=1`) it also beats the linear-attention baselines on
-speed but is not accurate enough on real trained-model activations. At high
-anchor count (`m=64`) it beats every efficient baseline on real-activation
-accuracy but is still slower than Performer on CPU. **The accuracy win and the
-speed loss are the same configuration.** Whether a middle `m` lands in a
-genuinely non-dominated (faster *and* competitively accurate) region is open and
-gated on a GPU measurement at realistic per-head dimension.
+At a single anchor (`m=1`) it is Pareto-competitive with the linear-attention
+baselines on GPU — **~4× faster than Performer at `d=128`**, tying Nyströmformer —
+but is not accurate enough on real trained-model activations. At high anchor count
+(`m=64`) it reaches the **lowest error of any method** (rel-err `0.24`) but is the
+slow config and, on the current dense build, **runs out of memory at `n≥8192`**.
+**The accuracy win and the speed/memory loss are the same configuration**, and the
+GPU Pareto measurement (A100, `d=64/128`, `n≤16384`) confirms no single `m` is
+non-dominated on both axes: anchor count is a monotone accuracy dial traded against
+latency and memory. The open problem is making the accurate high-`m` build fit in
+memory at long context.
 
 ## Speed
 
@@ -162,11 +165,61 @@ off by default. Data: `results/reduced_build_a100.json` (time/memory/FLOP) and
 `results/reduced_accuracy_gate_d128.json` (accuracy). Measured on A100 (not H100);
 the accuracy verdict is hardware-independent.
 
+## GPU speed–accuracy Pareto at realistic `d`: the existential gate, resolved
+
+The speed claim was measured directly on an NVIDIA A100 80GB across per-head
+`d ∈ {64, 128}`, `n ∈ {1024…16384}` at fixed `batch·heads = 256`, both `fp32` and
+`bf16`, forward and forward+backward, non-causal and causal — the full grid the
+efficiency framing depends on (`results/cuda_scaling_a100.json`, forward-pass
+latency below is `bf16`). Every softmax reference (a manual `O(n²)` build and a
+fair `scaled_dot_product_attention` with the flash and memory-efficient backends
+disabled) runs out of memory by `n=8192` at both dimensions, so the sub-quadratic
+methods are the only survivors at long context.
+
+The headline concern — that the `d²` factor would erase the speed lead at the
+realistic per-head `d=128` — **does not hold**. At `d=128` the single-anchor
+`m=1` build is **~4× faster than Performer at every length** (`0.26–0.29×` its
+latency) and roughly ties Nyströmformer. But it does **not dominate the frontier**:
+Luna (pack 64) is ~1.65× faster still, so `m=1` is Pareto-competitive, not
+Pareto-best, on latency alone.
+
+Joining that latency with the real-activation accuracy above gives the honest
+picture at the representative operating point (`d=128`, `n=8192`, `bf16`):
+
+| method | fwd latency | peak mem | worst-layer rel-err |
+|---|---|---|---|
+| luna (pack 64) | 3.8 ms | 3.2 GB | ~0.9 (Performer-class) |
+| nyströmformer L=64 | 5.7 ms | 3.8 GB | 0.52 |
+| **piecewise `m=1`** | **6.3 ms** | **3.2 GB** | 0.67 |
+| linformer k=256 | 9.2 ms | 4.4 GB | — |
+| performer M=256 | 24.2 ms | 6.5 GB | 0.95 |
+| **piecewise `m=64`** | **OOM** | — | **0.24 (best of all)** |
+| softmax (manual / SDPA-math) | OOM | — | 0 (exact) |
+
+The tension the whole project turns on is now measured on both axes at once: the
+configuration that wins **accuracy** (`m=64`, rel-err `0.24`, best of every method)
+**runs out of memory at `n≥8192`** on the current dense build, while the
+configuration that wins **speed/memory** (`m=1`) is the least accurate piecewise
+setting. Anchor count is a monotone accuracy dial (`m=1→64`: `0.67→0.51→0.43→0.24`)
+that trades directly against latency and memory; no single `m` is non-dominated on
+both axes against the linear baselines. The causal path confirms the memory ceiling
+directly — causal `m=1` materialises a `(batch, n, d, d)` cumulative-sum tensor, so
+it OOMs at `n=8192, d=64` in `fp32` but fits in `bf16` (and OOMs at `n=16384`).
+
+Consequence for the framing: the defensible headline is **not "fastest"** but that
+piecewise is a deterministic linear-attention method whose single anchor-count knob
+sweeps a competitive accuracy–latency frontier — `m=1` sits with the fast linear
+baselines (4× over Performer) and `m=64` reaches the lowest error of any method,
+with the open engineering problem being to make the accurate high-`m` build fit in
+memory at long context. Reproduced by `benchmarks/harness/run_cuda_scaling.py`;
+measured on A100 (not H100), a hardware-independent Pareto verdict.
+
 ## What is not yet established
 
-- GPU speed–accuracy Pareto at realistic per-head `d` (64–128) across
-  `n∈{1k…16k}`, fp32 and bf16, forward and forward+backward — the existential
-  gate for the efficiency framing.
+- Whether the accurate high-`m` build can be made to **fit in memory at long
+  context** (`n≥8192`, `d=128`) — `m=64` currently OOMs on the dense
+  `(batch, m, d, d)` operator, which is what keeps the accuracy-winning config off
+  the long-context frontier. This is now the primary open problem for the framing.
 - Whether an SVD-free variant of the reduced build (amortized/cached `R_j` under
   frozen anchors, or a batched randomized range-finder) can realize the confirmed
   query-residual low rank as a wall-clock win. The straightforward per-forward
