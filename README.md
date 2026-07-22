@@ -1,283 +1,251 @@
 # Piecewise Linear Attention
 
-> Novel efficient attention mechanism using piecewise linear approximation
+> A deterministic, linear-time attention that approximates softmax by first-order Taylor expansion around representative "anchor" queries.
 
 ## Overview
 
-This project implements **PiecewiseAttention**, an efficient attention mechanism that achieves **up to 84× speedup** over standard attention while maintaining good accuracy. Instead of computing full softmax attention for all queries or using linear attention (which has poor accuracy), we use first-order Taylor approximation around representative queries.
+**PiecewiseAttention** approximates softmax attention in linear time. Instead of the full `O(n²·d)` softmax, it computes exact softmax attention and its analytic Jacobian at a small number of *anchor* queries, then linearizes every query around its nearest anchor:
 
-**Key Results:**
-- ⚡ **84× faster** than standard attention (at n=4096, batch=64)
-- 🎯 **20 percentage points better accuracy** than linear attention (52% vs 72% error)
-- 💾 **Memory efficient**: O(batch · d²) instead of O(batch · n²)
-- 🚀 **Simple API**: No initialization, no clustering, just works!
+```
+output[i] ≈ A(a) + J(a) · (q_i − a)
+```
 
-See [THEORY.md](THEORY.md) for the complete theoretical foundation.
+where `a` is the anchor for query `i`, `A(a)` is exact softmax attention at the anchor, and `J(a)` is the analytic Jacobian of the attention map. The apply is fused so that no per-query `d×d` Jacobian is ever materialized, giving `O(n·d²)` cost — linear in sequence length.
 
-## Key Idea
+**What the evidence shows** (all numbers reproduce from the versioned files in [`results/`](results/); see [Reproducing the evidence](#reproducing-the-evidence) for the exact commands and operating points):
 
-Instead of computing full softmax attention for all $n$ queries (expensive) or using linear attention with kernel feature maps (inaccurate), we:
+- **Faster than Performer at long sequences.** At `n=4096` (dim=24, B·H=256, MPS) the single mean-anchor forward is **~4× faster than Performer** and ~44× faster than exact softmax (12.4 ms vs 48.6 ms vs 552.6 ms). The linear-time methods cross below softmax around `n≈1024`.
+- **Closer to softmax than Performer.** On the approximation microbenchmark the mean-anchor's mean relative error to exact softmax is **0.33 vs Performer's 1.70** — roughly 5× closer on average, and ~10× closer when queries are clustered.
+- **Solves a task that linear attention cannot.** On synthetic associative recall (`n=64`, 12k steps, 8 seeds) the mean anchor reaches **0.995** accuracy (exact softmax = 1.000), while kernel/linear attention fails at chance (0.126).
 
-1. Select one representative query per batch sample (e.g., mean of all queries)
-2. Compute exact softmax attention and analytical Jacobian at this representative query
-3. Use first-order Taylor approximation for all other queries: `output[i] ≈ A(q̃) + J · (q[i] - q̃)`
+**Honest scope.** These results are on synthetic benchmarks with small models, timed on Apple Silicon (MPS) — not CUDA or real-data end-to-end training. At short sequences (`n<1024`) the method is *slower* than softmax; the win is asymptotic. Extending to real tasks, realistic `dim`, and long context is ongoing work (see the open issues).
 
-This leverages the fact that locally, the attention function can be well-approximated by its first-order Taylor expansion, eliminating the need for clustering and nearest-neighbor search.
+See [THEORY.md](THEORY.md) for the derivation.
 
-## 🚀 Try it on Google Colab!
+## Key idea
 
-**Run experiments with free GPU** - no installation needed. Choose your experiment:
+Softmax attention `A(q) = Σ_i softmax(⟨k_i, q⟩/√d)·v_i` is smooth in `q`, so near an anchor `a` it is well-approximated by its first-order Taylor expansion. The method:
 
-| Experiment | Dataset | Notebook |
-|------------|---------|----------|
-| **Translation** | Multi30K (German→English) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/grapentt/piecewise-linear-attention/blob/main/experiments/translation/colab_translation.ipynb) |
-| **Vision** | CIFAR-10 (ViT) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/grapentt/piecewise-linear-attention/blob/main/experiments/vision/colab_vision.ipynb) |
-| **BERT** | SST-2 (Sentiment) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/grapentt/piecewise-linear-attention/blob/main/experiments/bert/colab_bert.ipynb) |
-| **Benchmark** | Performance Analysis | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/grapentt/piecewise-linear-attention/blob/main/benchmarks/colab_benchmark.ipynb) |
+1. **Selects anchors** from the queries via a pluggable strategy (default: the single mean/centroid; also k-means or strided positions).
+2. **Computes exact attention and the analytic Jacobian** at each anchor.
+3. **Linearizes** each query around its nearest anchor: `A(q) ≈ A(a) + J(a)·(q − a)`.
 
-Each notebook includes:
-- ✅ Easy repo cloning with custom branch support
-- ✅ Training/benchmarking with all three attention types (standard, linear, piecewise)
-- ✅ Automatic visualization & comparison
-- ✅ Result download
-
----
+The first-order truncation error grows with `‖q − a‖²`, so a good anchor keeps every query close to its expansion point. The **single mean-centroid anchor** minimizes the mean squared query-to-anchor distance by construction, which is why it is both the fastest configuration (one anchor, no routing) and the most accurate first-order one.
 
 ## Installation
 
 ### Using uv (recommended)
 
 ```bash
-# Install dependencies
-uv pip install -e .
-
-# Install with development dependencies
-uv pip install -e ".[dev]"
-
-# Install with experiment dependencies
-uv pip install -e ".[experiments]"
-
-# Install all optional dependencies
-uv pip install -e ".[dev,benchmark,experiments,docs]"
+uv pip install -e .                                  # core
+uv pip install -e ".[dev]"                           # + dev tooling
+uv pip install -e ".[experiments]"                   # + experiment deps
+uv pip install -e ".[dev,benchmark,experiments,docs]" # everything
 ```
 
 ### Using pip
 
 ```bash
 pip install -e .
-pip install -e ".[dev]"  # with development dependencies
-pip install -e ".[experiments]"  # for running experiments
+pip install -e ".[dev]"
+pip install -e ".[experiments]"
 ```
 
-## Project Structure
+## Quick start
 
-```
-piecewise-linear-attention/
-├── piecewise_linear_attention/
-│   ├── core/
-│   │   └── attention.py          # All three attention implementations
-│   └── tests/                    # Test suite
-├── benchmarks/
-│   └── benchmark.py              
-├── THEORY.md                     # Theoretical foundation
-└── README.md                     # This file
-```
-
-## Quick Start
-
-### Non-Causal Attention
+### Non-causal attention
 
 ```python
 import torch
 from piecewise_linear_attention import PiecewiseAttention
 
-# Initialize attention mechanism - that's it, no initialization needed!
+# Default: single mean-centroid anchor — fastest and most accurate first-order config.
 attention = PiecewiseAttention(dim=512)
 
-# Create sample inputs
 batch_size, seq_len, dim = 2, 1024, 512
 Q = torch.randn(batch_size, seq_len, dim)
 K = torch.randn(batch_size, seq_len, dim)
 V = torch.randn(batch_size, seq_len, dim)
 
-# Compute attention
-output, pseudo_queries = attention(Q, K, V)
+output, anchors = attention(Q, K, V)
 print(output.shape)  # (2, 1024, 512)
 ```
 
-### Causal Attention (Language Modeling)
+### Choosing an anchor strategy (multi-anchor)
+
+More anchors can converge faster on some tasks at higher cost. Strategies are pluggable; the mean centroid is the recommended default.
 
 ```python
-# For training: use mean of all queries as anchor
-attention_train = PiecewiseAttention(
-    dim=512,
-    causal=True,
-    causal_pseudo_query="mean"  # best for training
-)
+from piecewise_linear_attention.core.anchors import KMeansAnchor, StrideAnchor
 
-# For autoregressive inference: use first query as anchor
-attention_infer = PiecewiseAttention(
-    dim=512,
-    causal=True,
-    causal_pseudo_query="first"  # zero information leakage
-)
+# Centroid anchors on query clusters (minimize query-to-anchor distance).
+attn_kmeans = PiecewiseAttention(dim=512, anchor_strategy=KMeansAnchor(k=4, iters=3))
+
+# Positional anchors at fixed sequence strides (cheapest selection; a baseline).
+attn_stride = PiecewiseAttention(dim=512, anchor_strategy=StrideAnchor(k=4))
+```
+
+Multi-anchor mode is non-causal only.
+
+### Causal attention (language modeling)
+
+The causal path uses a single anchor and a cumsum formulation for `O(n·d²)` masking.
+
+```python
+# Training: mean of all queries as the anchor.
+attention_train = PiecewiseAttention(dim=512, causal=True, causal_pseudo_query="mean")
+
+# Autoregressive inference: first query as the anchor (no future leakage).
+attention_infer = PiecewiseAttention(dim=512, causal=True, causal_pseudo_query="first")
 
 output, _ = attention_train(Q, K, V)
 ```
 
-### Custom Pseudo-Query Selection
+### Building by name
 
-You can customize how the representative query is selected (non-causal only):
+All mechanisms are available through a registry for benchmarks and experiments:
 
 ```python
-def first_query_selector(Q):
-    """Use the first query instead of the mean."""
-    return Q[:, 0, :]  # (batch, dim)
+from piecewise_linear_attention.core.registry import build_attention, available_attention_types
 
-attention = PiecewiseAttention(dim=512, pseudo_query_fn=first_query_selector)
-output, _ = attention(Q, K, V)
+print(available_attention_types())
+# ['linear', 'performer', 'piecewise', 'piecewise_kmeans', 'piecewise_stride', 'standard']
+
+attn = build_attention("piecewise", dim=64, dropout=0.0, causal=False)
 ```
 
-## Features
+## Try it on Google Colab
 
-- ✅ **PiecewiseAttention**: Piecewise linear attention (RECOMMENDED)
-  - 8-9× faster than standard attention
-  - 30% better accuracy than linear attention
-  - No initialization or clustering required
-  - **Causal masking support** with O(n·d²) complexity
-  - Configurable anchor selection for training vs inference
-  - Extensible via custom `pseudo_query_fn`
-- ✅ **StandardAttention**: Full softmax attention baseline
-- ✅ **LinearAttention**: Proper linear attention with kernel feature maps (ELU, ReLU, softplus)
-- ✅ **Analytical Jacobian Computation**: Exact gradients for first-order approximation
-- ✅ **Comprehensive Tests**: Unit tests and integration tests
-- ✅ **Benchmarking Tools**: Comprehensive benchmarks comparing all methods
+Run experiments with a free GPU — no installation needed:
+
+| Experiment | Dataset | Notebook |
+|------------|---------|----------|
+| **Translation** | Multi30K (German→English) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/grapentt/piecewise-linear-attention/blob/main/experiments/translation/colab_translation.ipynb) |
+| **Vision** | CIFAR-10 (ViT) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/grapentt/piecewise-linear-attention/blob/main/experiments/vision/colab_vision.ipynb) |
+| **BERT** | SST-2 (Sentiment) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/grapentt/piecewise-linear-attention/blob/main/benchmarks/colab_benchmark.ipynb) |
+| **Benchmark** | Performance analysis | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/grapentt/piecewise-linear-attention/blob/main/benchmarks/colab_benchmark.ipynb) |
+
+## Results
+
+All figures below reproduce from the versioned JSON in [`results/`](results/) via the harness CLIs in [`benchmarks/harness/`](benchmarks/harness/). Timings are on Apple Silicon (MPS), PyTorch 2.10; treat them as relative comparisons on this backend, not absolute CUDA numbers.
+
+### Speed — forward wall-clock vs sequence length
+
+`dim=24`, `B·H=256`, mean over 50 forwards after warmup ([`results/scaling.json`](results/scaling.json)):
+
+| n | softmax | Performer | piecewise (mean) | speedup vs Performer |
+|---|---|---|---|---|
+| 512 | 7.61 ms | 5.76 ms | 1.48 ms | 3.9× |
+| 1024 | 30.77 ms | 11.82 ms | 2.85 ms | 4.1× |
+| 2048 | 124.58 ms | 23.52 ms | 5.62 ms | 4.2× |
+| 4096 | 552.62 ms | 48.59 ms | 12.43 ms | 3.9× |
+
+The linear-time methods overtake softmax around `n≈1024`; below that, softmax's small constant wins.
+
+### Approximation quality — relative error to exact softmax
+
+`dim=64`, averaged over the dispersion×length grid ([`results/microbench.json`](results/microbench.json); lower is better):
+
+| method | mean rel-err |
+|---|---|
+| piecewise (k-means, m=4) | 0.31 |
+| **piecewise (mean, m=1)** | **0.33** |
+| piecewise (stride, m=4) | 0.56 |
+| linear (ELU) | 0.84 |
+| Performer | 1.70 |
+
+Centroid placement (mean, k-means) beats positional placement (stride); the single mean anchor nearly matches 4-way k-means at a quarter of the anchor cost.
+
+### Task capability — associative recall
+
+`n=64`, 12k steps, 8 seeds ([`results/recall.json`](results/recall.json); chance = 0.0625):
+
+| method | accuracy (mean) |
+|---|---|
+| softmax (exact) | 1.000 |
+| piecewise (stride, m=4) | 0.997 |
+| **piecewise (mean, m=1)** | **0.995** |
+| piecewise (k-means, m=4) | 0.984 |
+| Performer | 0.981 |
+| linear | 0.126 (fails) |
+
+Linear/kernel attention is the only method that fails recall. Performer's occasional *early* accuracy edge over softmax during training is a convergence-speed transient (it leads by up to +0.64 accuracy around step 4k, is overtaken by ~step 6k, and plateaus below exact softmax at convergence) — not a capability edge.
+
+A two-panel speed-vs-quality figure can be regenerated with `python benchmarks/harness/plot_results.py` (the PNG is not committed, matching the repo's image policy).
+
+## Reproducing the evidence
+
+```bash
+# Speed vs sequence length (writes results/scaling.json)
+python benchmarks/harness/run_scaling.py --lengths 512 1024 2048 4096 --out results/scaling.json
+
+# Approximation error vs dispersion and length (writes results/microbench.json)
+python benchmarks/harness/run_microbench.py --out results/microbench.json
+
+# Associative recall, seed-averaged (writes results/recall.json; long run)
+python benchmarks/harness/run_recall.py --seeds 0 1 2 3 4 5 6 7 --lengths 64 \
+    --steps 12000 --eval-every 1000 --out results/recall.json
+
+# Speed-vs-quality figure from the JSON above
+python benchmarks/harness/plot_results.py --out results/speed_vs_quality.png
+```
+
+Each CLI has a `--smoke` mode (tiny, seconds) used by the test suite to guard the pipeline.
+
+## Attention mechanisms
+
+- **PiecewiseAttention** — first-order Taylor approximation around anchor queries; `O(n·d²)`. Pluggable anchor strategies (`MeanAnchor` default, `KMeansAnchor`, `StrideAnchor`); causal support via cumsum.
+- **StandardAttention** — exact softmax baseline; `O(n²·d)`.
+- **LinearAttention** — kernel-feature-map linear attention (ELU/ReLU/softplus).
+- **PerformerAttention** — FAVOR+ random-feature softmax estimator; unbiased but stochastic.
 
 ## Development
 
-### Running Tests
-
 ```bash
-# Run all tests
+# Tests
 pytest
-
-# Run with coverage
 pytest --cov=piecewise_linear_attention --cov-report=html
 
-# Run specific test file
-pytest piecewise_linear_attention/tests/test_attention.py
-```
-
-### Code Formatting
-
-```bash
-# Format code
-black piecewise_linear_attention/
-isort piecewise_linear_attention/
-
-# Check types
+# Formatting / types
+black piecewise_linear_attention/ benchmarks/
+isort piecewise_linear_attention/ benchmarks/
 mypy piecewise_linear_attention/
 ```
 
-### Benchmarking
+## Algorithm details
 
-```bash
-# Run comprehensive benchmark comparing all attention mechanisms
-python benchmarks/benchmark.py
-```
-
-## Performance Results
-
-Comprehensive benchmarks on CPU (Apple Silicon):
-
-**Key Findings:**
-- **Speedup scales with batch size**: 1.6× (batch=1) → 84.2× (batch=64)
-- **Consistent accuracy**: ~52% error across all scales
-- **Best tradeoff**: 20 percentage points better accuracy than linear attention at comparable speed
-
-**Medium scale: batch=16, n=1024, dim=64:**
-
-| Method | Time (ms) | Speedup | Error | Memory (MB) |
-|--------|-----------|---------|-------|-------------|
-| StandardAttention | 8.94 | 1.0× | 0% | 462 |
-| LinearAttention (ReLU) | 0.76 | 11.9× | 72% | 474 |
-| **PiecewiseAttention** | **0.84** | **10.7×** | **52%** | **474** ✅ |
-
-**Very large scale: batch=64, n=4096, dim=64** (16.8M elements):
-
-| Method | Time (ms) | Speedup | Error | Memory (MB) |
-|--------|-----------|---------|-------|-------------|
-| StandardAttention | 895.13 | 1.0× | 0% | 4614 |
-| LinearAttention (ReLU) | 11.76 | 76.1× | 72% | 778 |
-| **PiecewiseAttention** | **10.64** | **84.2×** | **52%** | **785** ✅ |
-
-Memory profiling validates O(d²) complexity (constant with sequence length). See [benchmarks](benchmarks/) for details.
-
-## Contributing
-
-Contributions are welcome! This is an open research project. Feel free to:
-- Report issues
-- Suggest improvements
-- Submit pull requests
-- Discuss ideas
-
-## License
-
-MIT License - see LICENSE file for details
-
-## Algorithm Details
-
-### Non-Causal PiecewiseAttention
+### Non-causal (multi-anchor)
 
 ```
-For each batch sample:
-  1. Select representative query: q̃ = mean(Q)  # or custom function
-  2. Compute exact attention at q̃:
-     - scores = q̃ @ K^T / sqrt(d)
-     - α = softmax(scores)
-     - output_0 = Σ α_i · v_i
-  3. Compute analytical Jacobian J at q̃
-  4. For each query q_i:
-     - output[i] ≈ output_0 + J · (q_i - q̃)
+1. Select m anchors from Q via the anchor strategy (default: mean/centroid, m=1).
+2. At each anchor a_j compute the exact attention output o_j = A(a_j) and the
+   analytic-Jacobian factors (M_j = Σ_n α_jn v_n k_nᵀ, weighted keys wk_j).
+3. Assign each query to its nearest anchor (argmin distance; non-differentiable).
+4. Apply the fused first-order expansion, distributing the matmul over the
+   rank-1 Jacobian so no per-query d×d matrix is formed:
+     out_i = o_j + s·(M_j·Δq) − s·o_j·(wk_jᵀ·Δq),   Δq = q_i − a_j,  s = 1/√d
 ```
 
-**Complexity**: O(batch · n · d²) vs O(batch · n² · d) for standard attention
+**Complexity**: `O(batch · m · n · d²)` — linear in `n` with small constant `m`, vs `O(batch · n² · d)` for softmax.
 
-### Causal PiecewiseAttention (Optimized with Cumsum)
+### Causal (cumsum)
+
+Linearizing the exponential kernel *before* summation lets cumulative sums carry the per-position Jacobian:
 
 ```
-For each batch sample:
-  1. Select anchor query: q̄ = mean(Q) or Q[0]
-  2. Compute anchor weights: s_j = exp(q̄ @ k_j / sqrt(d))
-  3. Precompute cumsum terms:
-     - A_j = s_j * v_j
-     - B_j = s_j * (k_j ⊗ v_j)
-     - C_j = s_j
-     - D_j = s_j * k_j
-  4. Apply cumsum: S^A, S^B, S^C, S^D = cumsum(A, B, C, D)
-  5. For each position i:
-     - numerator_i = S^A[i] + S^B[i] @ (q_i - q̄)
-     - denominator_i = S^C[i] + S^D[i] @ (q_i - q̄)
-     - output[i] = numerator_i / denominator_i
+1. Anchor q̄ = mean(Q) (train) or q_0 (inference).
+2. Anchor weights σ_j = exp(s · q̄·k_j).
+3. Cumsum terms S^A=Σσ_j v_j, S^B=Σσ_j (k_j⊗v_j), S^C=Σσ_j, S^D=Σσ_j k_j.
+4. output_i = (S^A_i + s·S^B_i·(q_i−q̄)) / (S^C_i + s·S^D_iᵀ·(q_i−q̄))
 ```
 
-**Complexity**: O(batch · n · d²) - same as LinearAttention but better accuracy!
-
-**Key insight**: By linearizing the exponential kernel *before* summation, we can use cumsum for efficient causal masking while computing the same Jacobian-based approximation.
-
----
-
-## Documentation
-
-- **[THEORY.md](THEORY.md)** - Theoretical foundation and mathematical derivations
+**Complexity**: `O(n·d²)` time — the same class as linear attention, computing the exact anchor Jacobian.
 
 ## Citation
 
-If you use this code in your research, please cite:
-
 ```bibtex
 @software{piecewise_linear_attention,
-  title = {Piecewise Linear Attention: Efficient Attention Approximation},
+  title = {Piecewise Linear Attention: Deterministic Linear-Time Attention via Anchor Taylor Expansion},
   year = {2026},
   url = {https://github.com/grapentt/piecewise-linear-attention}
 }
@@ -287,4 +255,9 @@ If you use this code in your research, please cite:
 
 - Vaswani et al. (2017). "Attention is All You Need"
 - Katharopoulos et al. (2020). "Transformers are RNNs: Fast Autoregressive Transformers with Linear Attention"
-- See [THEORY.md](THEORY.md) for complete references
+- Choromanski et al. (2021). "Rethinking Attention with Performers"
+- See [THEORY.md](THEORY.md) for the complete derivation and references.
+
+## License
+
+MIT License — see LICENSE file for details.
