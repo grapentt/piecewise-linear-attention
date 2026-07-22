@@ -2,7 +2,7 @@
 
 ## Abstract
 
-This document presents the theoretical foundation for **piecewise-linear-attention**, a novel attention mechanism that achieves sub-quadratic complexity while maintaining better accuracy than linear attention. By using first-order Taylor approximation around a representative query per batch sample, we reduce computational complexity from $O(n^2 \cdot d)$ to $O(n \cdot d^2)$, matching linear attention's complexity while achieving 20 percentage points better accuracy.
+This document presents the theoretical foundation for **piecewise-linear-attention**, a deterministic linear-time attention mechanism. By linearizing softmax attention with a first-order Taylor expansion around a small set of representative *anchor* queries, we reduce computational complexity from $O(n^2 \cdot d)$ to $O(n \cdot d^2)$ — the same class as linear attention, but tracking softmax far more closely because the expansion is exact *at* each anchor and its error grows only quadratically with the query-to-anchor distance. On synthetic benchmarks the mean-centroid variant approximates softmax markedly better than random-feature (Performer) and kernel (linear) attention, and it solves associative recall where linear attention fails; see the `results/` directory and the project README for the reproducible measurements and their operating points.
 
 ---
 
@@ -58,32 +58,25 @@ where $J_{q_0}f$ is the Jacobian of $f$ at $q_0$.
 
 ### 2.2 Method
 
-1. **Define Pseudo-Queries**: Learn or compute $k$ pseudo-query positions $\{\tilde{q}_1, \tilde{q}_2, \ldots, \tilde{q}_k\}$ where $k \ll n$
+1. **Select anchors**: choose $m$ anchor queries $\{a_1, \ldots, a_m\}$ with $m \ll n$ via a pluggable strategy. The default is the single **mean/centroid** anchor ($m=1$, $a = \frac{1}{n}\sum_i q_i$); alternatives place anchors on query clusters (k-means) or at fixed sequence positions (stride).
 
-2. **Compute Exact Attention at Pseudo-Queries**: For each pseudo-query $\tilde{q}_j$, compute the full softmax attention:
-   $$\Delta(\tilde{q}_j) = \sum_{i=1}^{n} v_i \cdot \text{softmax}(\langle k_i, \tilde{q}_j \rangle)$$
+2. **Compute exact attention at anchors**: for each anchor $a_j$, compute the full softmax attention
+   $$A(a_j) = \sum_{i=1}^{n} v_i \cdot \text{softmax}(\langle k_i, a_j \rangle / \sqrt{d})$$
 
-3. **Compute Jacobians**: For each pseudo-query $\tilde{q}_j$, compute the Jacobian $J_{\tilde{q}_j}$ of the attention function
+3. **Compute the analytic Jacobian** $J_A(a_j)$ of the attention map at each anchor (closed form in §4.3).
 
-4. **Approximate Queries**: For any actual query $q$, find the nearest pseudo-query $\tilde{q}_j$ and use linearization:
-   $$\Delta(q) \approx \Delta(\tilde{q}_j) + J_{\tilde{q}_j}(q - \tilde{q}_j)$$
+4. **Linearize each query around its nearest anchor** $a_{j(i)}$:
+   $$A(q_i) \approx A(a_{j(i)}) + J_A(a_{j(i)})\,(q_i - a_{j(i)})$$
+
+For the default single-anchor case, step 3's nearest-anchor assignment is trivial (every query uses the one anchor) and the whole map is differentiable end-to-end. For $m>1$ the assignment is a non-differentiable `argmin`; gradients still flow through the expansion with respect to $Q, K, V$ (straight-through routing).
 
 ### 2.3 Complexity Analysis
 
-- **Precomputation Phase**:
-  - Compute attention at $k$ pseudo-queries: $O(k \cdot n)$
-  - Compute $k$ Jacobians: $O(k \cdot n \cdot d)$
-  - Total: $O(k \cdot n \cdot d)$
+- **Anchor phase**: exact attention and Jacobian factors at $m$ anchors: $O(m \cdot n \cdot d)$ for the outputs and weighted keys, $O(m \cdot n \cdot d^2)$ for the second-moment factor $M_j = \sum_n \alpha_{jn}\, v_n k_n^\top$.
 
-- **Query Phase**:
-  - For each of $n$ queries:
-    - Find nearest pseudo-query: $O(k \cdot d)$ with efficient search
-    - Apply affine transformation: $O(d^2)$
-  - Total: $O(n \cdot k \cdot d)$
+- **Apply phase**: the expansion is applied in a **fused** form (§4.5) that distributes the matmul over the rank-1 Jacobian, so a per-query $d\times d$ matrix is never materialized: $O(m \cdot n \cdot d^2)$.
 
-**Overall Complexity**: $O(n \cdot k \cdot d)$ where $k \ll n$
-
-This is a significant improvement over $O(n^2 \cdot d)$ for standard attention when $k$ is small (e.g., $k = \sqrt{n}$ or $k = \log(n)$).
+**Overall**: $O(\text{batch} \cdot m \cdot n \cdot d^2)$ — linear in $n$ with a small constant $m$ (typically 1–8), versus $O(\text{batch} \cdot n^2 \cdot d)$ for standard attention. The linear-time methods overtake softmax once $n$ is past the $n \approx d\cdot m$ FLOP crossover (empirically $n\approx1024$ on the tested backend); below that, softmax's small constant wins.
 
 ---
 
@@ -93,32 +86,12 @@ This is a significant improvement over $O(n^2 \cdot d)$ for standard attention w
 
 1. **Efficiency**: Achieve sub-quadratic complexity while maintaining expressive power
 2. **Accuracy**: Minimize approximation error compared to full softmax attention
-3. **Learnability**: Make pseudo-queries learnable to optimize approximation quality
-4. **Scalability**: Enable attention over sequences of length 10k-100k+ tokens
+3. **Learnability**: Optionally learn the anchor placement to further reduce approximation error
+4. **Scalability**: Enable attention over long sequences ($n \gg 10^3$)
 
 ### 3.2 Key Research Questions
 
-1. **Pseudo-Query Selection**:
-   - How many pseudo-queries $k$ are needed for good approximation?
-   - Should pseudo-queries be learned, fixed, or adaptive?
-   - How to initialize pseudo-queries?
-
-2. **Approximation Quality**:
-   - What is the approximation error bound as a function of $k$?
-   - How does query space curvature affect approximation quality?
-   - Can we use higher-order approximations (beyond first-order)?
-
-3. **Jacobian Computation**:
-   - Efficient computation and storage of Jacobians
-   - Can we use implicit representations or low-rank approximations?
-
-4. **Nearest Pseudo-Query Search**:
-   - Efficient data structures (KD-trees, locality-sensitive hashing)
-   - Trade-off between search accuracy and speed
-
-5. **Training Dynamics**:
-   - How to jointly train pseudo-queries with model parameters?
-   - Stability of gradient flow through piecewise approximations
+The core questions — how many anchors, where to place them, whether higher-order terms help, and deterministic vs. stochastic approximation — are addressed by the current evidence and tracked in §7 (Open Questions and Future Directions).
 
 ### 3.3 Expected Benefits
 
@@ -135,11 +108,11 @@ This is a significant improvement over $O(n^2 \cdot d)$ for standard attention w
 
 - $n$: sequence length
 - $d$: embedding dimension
-- $k$: number of pseudo-queries
+- $m$: number of anchors ($m \ll n$; default $m=1$)
 - $Q, K, V \in \mathbb{R}^{n \times d}$: query, key, value matrices
-- $\tilde{Q} \in \mathbb{R}^{k \times d}$: pseudo-query matrix
+- $a_j \in \mathbb{R}^d$: the $j$-th anchor query
 - $q_i, k_i, v_i \in \mathbb{R}^d$: individual query, key, value vectors
-- $A(q) = \sum_i v_i \cdot \text{softmax}(\langle k_i, q \rangle)$: attention function
+- $A(q) = \sum_i v_i \cdot \text{softmax}(\langle k_i, q \rangle / \sqrt d)$: attention function
 
 ### 4.2 Attention Function Properties
 
@@ -150,57 +123,49 @@ The softmax attention function $A: \mathbb{R}^d \to \mathbb{R}^d$ is:
 
 ### 4.3 First-Order Approximation
 
-For pseudo-query $\tilde{q}_j$ and actual query $q$:
+For anchor $a$ and actual query $q$:
 
-$$A(q) \approx A(\tilde{q}_j) + J_A(\tilde{q}_j) \cdot (q - \tilde{q}_j)$$
+$$A(q) \approx A(a) + J_A(a) \cdot (q - a)$$
 
-where the Jacobian is:
+Writing $s = 1/\sqrt{d}$ for the scale and $\alpha_i = \text{softmax}(s\langle k_i, a\rangle)$ for the anchor's attention weights, the **analytic Jacobian** of the softmax attention map is
 
-$$J_A(\tilde{q}_j) = \sum_{i} v_i \otimes \nabla_q \text{softmax}(\langle k_i, q \rangle) \bigg|_{q=\tilde{q}_j}$$
+$$J_A(a) = s\left[\sum_{i} \alpha_i\,(v_i \otimes k_i) \;-\; A(a) \otimes \bar{k}\right], \qquad \bar{k} = \sum_i \alpha_i k_i .$$
 
-The gradient of softmax attention scores is:
-
-$$\nabla_q \text{softmax}(\langle k_i, q \rangle) = k_i \cdot \text{softmax}(\langle k_i, q \rangle) \left(1 - \text{softmax}(\langle k_i, q \rangle)\right)$$
+This is exact: it comes from differentiating the softmax weights, whose Jacobian is $\partial\alpha/\partial q = s\,(\text{diag}(\alpha) - \alpha\alpha^\top)K$. The rank-1 correction term $A(a)\otimes\bar{k}$ is the off-diagonal softmax coupling — dropping it (the naive "$\alpha(1-\alpha)$" diagonal form) gives a wrong Jacobian. The implementation and the causal cumsum derivation (§6.4) both use this exact form.
 
 ### 4.4 Error Analysis
 
-The approximation error for query $q$ near pseudo-query $\tilde{q}_j$ is bounded by:
+The approximation error for query $q$ near anchor $a$ is bounded by
 
-$$\|A(q) - [A(\tilde{q}_j) + J_A(\tilde{q}_j) \cdot (q - \tilde{q}_j)]\| \leq C \cdot \|q - \tilde{q}_j\|^2$$
+$$\left\|A(q) - \big[A(a) + J_A(a)\,(q - a)\big]\right\| \leq C \cdot \|q - a\|^2,$$
 
-where $C$ depends on the Hessian bound (second derivatives) of $A$ in the region.
+where $C$ depends on the Hessian bound of $A$ in the region. Empirically the mean first-order error tracks $\mathbb{E}\|q-a\|^2$ closely across dispersions, so **anchor placement is the dominant accuracy lever**: an anchor that keeps queries close to their expansion point is what matters, more than adding a curvature term (see §4.6).
 
-**Implication**: Error decreases quadratically with distance to nearest pseudo-query, suggesting that well-placed pseudo-queries can achieve good approximation.
+### 4.5 Fused Apply (no per-query Jacobian)
+
+Materializing $J_A(a)$ as an explicit $d\times d$ matrix per query is wasteful. Because $J_A(a)$ is a sum of a second-moment matrix and a rank-1 term, the expansion can be applied by distributing the matmul. With $o = A(a)$, $\bar{k} = \sum_i\alpha_i k_i$, $M = \sum_i \alpha_i\,v_i k_i^\top$, and $\Delta q = q - a$:
+
+$$A(q) \approx o + s\,(M\,\Delta q) - s\,o\,(\bar{k}^\top \Delta q).$$
+
+This is algebraically identical to $o + J_A(a)\,\Delta q$ but needs only the compact per-anchor factors $o, \bar{k}$ (each $\mathbb{R}^{d}$) and $M$ ($\mathbb{R}^{d\times d}$); no per-query $(d,d)$ tensor is ever formed. The apply is $O(m\cdot n\cdot d^2)$ and is what makes the method linear in $n$ in practice.
+
+### 4.6 Why the Mean Centroid Is the Recommended Anchor
+
+Since the first-order error scales with $\|q-a\|^2$, the single anchor that minimizes the mean squared query-to-anchor distance $\frac{1}{n}\sum_i\|q_i-a\|^2$ is the **centroid** $a=\frac{1}{n}\sum_i q_i$ — this is the definition of the mean. Consequently the single mean anchor ($m=1$) is simultaneously the cheapest configuration (one anchor, trivial routing) and the most accurate first-order one. Positionally placed anchors (e.g. strided sequence positions) sit at the edges of the query cloud, incur larger $\|\Delta q\|$, and are measurably worse. Adding more centroid anchors (k-means) reduces $\mathbb{E}\|\Delta q\|^2$ further and can speed convergence on some tasks, at proportionally higher cost.
 
 ---
 
-## 5. Implementation Roadmap
+## 5. Implementation Status
 
-### Phase 1: Core Components
-- Implement standard attention baseline
-- Implement linear attention baseline
-- Develop pseudo-query initialization strategies
-- Implement exact attention computation at pseudo-queries
+The formulation above is implemented in `piecewise_linear_attention`:
 
-### Phase 2: Approximation
-- Implement Jacobian computation (via autograd or analytical)
-- Implement nearest pseudo-query search
-- Implement piecewise linear approximation
+- **Baselines**: standard softmax, kernel linear attention (ELU/ReLU/softplus), and Performer (FAVOR+), all behind a common registry.
+- **Anchor strategies**: `MeanAnchor` (default, $m=1$ centroid), `KMeansAnchor` (centroid clusters), `StrideAnchor` (positional) — pluggable via `anchor_strategy`.
+- **Analytic Jacobian and fused apply** (§4.3, §4.5): the exact Jacobian factors are computed at each anchor and the expansion is applied without materializing a per-query $d\times d$ matrix.
+- **Causal path** (§6): the cumsum formulation for $O(n\cdot d^2)$ masked attention.
+- **Evidence harness**: reproducible CLIs (`benchmarks/harness/run_scaling.py`, `run_microbench.py`, `run_recall.py`, `plot_results.py`) that emit versioned JSON under `results/`.
 
-### Phase 3: Testing
-- Unit tests for all components
-- Approximation error measurement
-- Complexity benchmarks (time and memory)
-
-### Phase 4: Integration & Training
-- Integrate into transformer architecture
-- Training loop with learnable pseudo-queries
-- Comparison with baseline attention mechanisms
-
-### Phase 5: Evaluation
-- Performance on standard benchmarks
-- Scaling experiments (varying sequence length $n$ and $k$)
-- Analysis and visualization
+What is **not** yet established (see the repository issues): real-data end-to-end task quality, CUDA and realistic-$d$ scaling, the long-context ($n\gg10^3$) regime, and positioning against landmark/Nyström-style methods.
 
 ---
 
@@ -300,11 +265,17 @@ We match linear attention complexity while maintaining better approximation qual
 
 ## 7. Open Questions and Future Directions
 
-1. **Adaptive Pseudo-Queries**: Can pseudo-queries be adapted per layer or per head?
-2. **Higher-Order Approximation**: Is quadratic or higher-order approximation beneficial?
-3. **Sparse Patterns**: Can we combine with sparse attention patterns?
-4. **Theoretical Guarantees**: Can we prove bounds on approximation quality?
-5. **Hardware Optimization**: CUDA kernels for efficient Jacobian computation?
+**Settled by the current evidence** (see `results/` and the project issues):
+- *Anchor count vs. placement*: placement dominates — the single mean centroid is the most accurate first-order config; more anchors mainly affect convergence speed (§4.6).
+- *Higher-order terms*: an exact second-order term reduces error but has no linear-time ($O(n\cdot d)$) form, so it is not speed-compatible with the linear-time goal; low-rank/diagonal Jacobian approximations are refuted (the operators are full-rank).
+- *Deterministic vs. stochastic*: the deterministic linearization tracks softmax more closely than Performer's random features at matched compute, and is seed-free at inference.
+
+**Genuinely open**:
+1. **Real-data task quality**: language modeling, LRA, and ViT/BERT fine-tuning at realistic model sizes.
+2. **Long context and hardware**: CUDA kernels, realistic $d$ (64–128), and the $n\gg10^3$ regime where the linear-in-$n$ structure should dominate.
+3. **Anchor learning**: a learned query→anchor map (vs. mean/k-means) as a training-time bet.
+4. **Positioning**: head-to-head against landmark/Nyström-style low-rank attention, not only Performer/linear.
+5. **Reference-frame gradient**: whether detaching the centroid (stop-gradient anchor) improves training stability.
 
 ---
 
