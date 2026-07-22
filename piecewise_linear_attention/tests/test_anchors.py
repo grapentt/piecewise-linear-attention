@@ -177,7 +177,14 @@ class TestMultiAnchorAttention:
                 expected = out_a + (jac_a @ (q_i - a).unsqueeze(-1)).squeeze(-1)
                 assert torch.allclose(out[:, i, :], expected, atol=1e-5)
 
-    def test_fused_matches_gather_reference(self):
+    @pytest.mark.parametrize(
+        "b,n,d,m,collapse",
+        [
+            (3, 40, 16, 4, False),  # ordinary routing -> batched capacity-bucket path
+            (1, 20, 4, 8, True),    # m>d + one dominant cluster -> skew-guard fallback
+        ],
+    )
+    def test_fused_matches_gather_reference(self, b, n, d, m, collapse):
         """Fused apply equals a naive per-query-Jacobian gather reference.
 
         Locks: the fused ``O(seq_len·dim²)`` multi-anchor apply is numerically
@@ -192,17 +199,29 @@ class TestMultiAnchorAttention:
         wrong anchor slice, or an off-by-one in the assignment gather. None of
         these would be caught by a shape or finiteness check.
 
+        Both apply schedules are covered: the default capacity-bucket group-by-
+        anchor matmul, and the skew-guard fallback (a direct per-query gather-
+        matmul) that triggers when ``m · capacity > n · dim`` — reached here by an
+        ``m > dim`` head with the queries collapsed onto one dominant cluster so
+        one group's capacity approaches the full sequence. The fallback is a pure
+        performance switch and must return the identical result.
+
         Assessment: appropriate, not over-testing — this is the single
         load-bearing test that the optimization preserves output. It overlaps
         ``test_multi_anchor_hard_assignment`` only superficially: that test's
         reference is the exact per-anchor Jacobian path
         (``_compute_attention_and_jacobian``), so it validates *routing*, while
         this one validates the *fusion algebra* against an independent
-        gather-based reference. One representative shape suffices.
+        gather-based reference. The second shape folds in the otherwise-unexercised
+        fallback branch rather than adding a standalone test.
         """
         torch.manual_seed(0)
-        b, n, d, m = 3, 40, 16, 4
-        Q = torch.randn(b, n, d)
+        if collapse:
+            # Nearly identical queries route almost everything to one anchor, so
+            # its capacity ~ n and m·capacity > n·dim trips the skew guard.
+            Q = 0.001 * torch.randn(b, n, d) + 5.0
+        else:
+            Q = torch.randn(b, n, d)
         K = torch.randn(b, n, d)
         V = torch.randn(b, n, d)
         attn = PiecewiseAttention(dim=d, scale=True, anchor_strategy=StrideAnchor(m))
@@ -315,6 +334,108 @@ class TestMultiAnchorAttention:
         for bad in (0.0, -0.1, 1.5):
             with pytest.raises(ValueError):
                 PiecewiseAttention(dim=8, anchor_strategy=StrideAnchor(4), build_topp=bad)
+
+    def test_build_topp_truncates_to_per_anchor_nucleus(self):
+        """Top-p build sums each anchor over exactly its own nucleus of keys.
+
+        The two ``test_build_topp_reverts_when_diffuse`` assertions both land on
+        the keep-all boundary (``t == n``): they lock that truncation never fires
+        when it must not, but they never exercise the *active* regime the feature
+        exists for. This constructs moderately peaked keys so the per-anchor
+        nuclei are genuinely smaller than the sequence *and* differ across anchors
+        (sizes like 5/7/8 out of 32), then checks the fused factors equal an
+        explicit ragged reference that sums each anchor over only its own top keys.
+
+        Locks: the load-bearing algebra of the truncated build — the crossing-key
+        rule (``keep[...,1:] = cumulative[...,:-1] < p``, so the key that crosses p
+        is kept), the unrenormalized partial sum, and the ``torch.where`` zeroing of
+        the surplus slots between a short anchor's nucleus and the shared batched
+        cap ``t = max_j |nucleus_j|``.
+
+        Catches: an off-by-one in the crossing key (``<`` vs ``<=``), a tail key
+        leaking through unzeroed surplus slots (silent accuracy loss), and a wrong
+        advanced-index axis in the ``V``/``K`` gather. None are caught by the
+        keep-all boundary tests.
+
+        Assessment: appropriate, not over-testing. This is the single distinguishing
+        behavior of the top-p build; the shipped tests only prove the no-op limit,
+        so nothing else guards the sparse path.
+        """
+        torch.manual_seed(3)
+        b, n, d, m = 1, 32, 8, 3
+        Q = torch.randn(b, n, d)
+        V = torch.randn(b, n, d)
+        K = 2.0 * torch.randn(b, n, d)  # moderate peaking -> mid-size, uneven nuclei
+        p = 0.9
+
+        attn = PiecewiseAttention(
+            dim=d, scale=True, anchor_strategy=StrideAnchor(m), build_topp=p
+        )
+        with torch.no_grad():
+            anchors = attn.anchor_strategy.select(Q)
+            scale = 1.0 / math.sqrt(d)
+            alpha = torch.softmax(
+                torch.einsum("bmd,bnd->bmn", anchors, K) * scale, dim=-1
+            )
+            wk, second_moment = attn._build_jacobian_factors_topp(alpha, V, K)
+
+            # Independent ragged reference: each anchor sums over ONLY the smallest
+            # set of its own top keys whose cumulative mass reaches p (crossing key
+            # included), with no shared cap and no surplus slots.
+            sorted_alpha, sort_idx = torch.sort(alpha, dim=-1, descending=True)
+            cumulative = sorted_alpha.cumsum(dim=-1)
+            keep = torch.ones_like(sorted_alpha, dtype=torch.bool)
+            keep[..., 1:] = cumulative[..., :-1] < p
+            counts = keep.sum(dim=-1)  # (b, m)
+
+            # The construction must actually exercise the sparse, uneven regime.
+            assert int(counts.max()) < n, "nucleus is keep-all; truncation never fires"
+            assert counts.min() != counts.max(), "per-anchor nuclei are homogeneous"
+
+            wk_ref = torch.zeros(b, m, d)
+            m_ref = torch.zeros(b, m, d, d)
+            for bi in range(b):
+                for j in range(m):
+                    t_j = int(counts[bi, j])
+                    idx = sort_idx[bi, j, :t_j]
+                    aw = alpha[bi, j, idx]
+                    wk_ref[bi, j] = (aw[:, None] * K[bi, idx]).sum(0)
+                    m_ref[bi, j] = torch.einsum("t,td,te->de", aw, V[bi, idx], K[bi, idx])
+
+        assert torch.allclose(wk, wk_ref, atol=1e-5)
+        assert torch.allclose(second_moment, m_ref, atol=1e-5)
+
+    def test_grad_flows_through_topp_build(self):
+        """Gradients reach Q, K, V through the active top-p build subgraph.
+
+        ``test_grad_flows_through_multi_anchor`` covers only the dense build
+        (``build_topp=None``); the ``torch.sort`` + advanced-index gather +
+        ``torch.where`` subgraph that the truncated build adds is never
+        differentiated there. This runs the sparse path (peaked keys so ``t < n``)
+        and checks finite, non-trivial gradients still reach all of Q, K, V.
+
+        Locks: the truncated build stays differentiable end-to-end. Catches a
+        future edit that detaches ``alpha_kept`` or gathers keys/values under
+        ``no_grad`` — which would silently zero the K/V gradient on the linear
+        correction and pass every exactness test.
+
+        Assessment: appropriate — reuses the sibling test's body with peaked keys
+        and one config; the gap it fills (grad through the sparse subgraph) is real.
+        """
+        torch.manual_seed(0)
+        dim = 8
+        Q = torch.randn(2, 12, dim, requires_grad=True)
+        K = (3.0 * torch.randn(2, 12, dim)).requires_grad_(True)  # peaked -> t < n
+        V = torch.randn(2, 12, dim, requires_grad=True)
+        attn = PiecewiseAttention(
+            dim=dim, scale=True, anchor_strategy=KMeansAnchor(3), build_topp=0.9
+        )
+        out, _ = attn(Q, K, V)
+        out.sum().backward()
+        for name, t in [("Q", Q), ("K", K), ("V", V)]:
+            assert t.grad is not None, f"no grad for {name}"
+            assert torch.isfinite(t.grad).all()
+            assert t.grad.abs().sum() > 0, f"zero grad for {name}"
 
     def test_multi_anchor_rejects_causal(self):
         """Multi-anchor + causal is rejected at construction.
