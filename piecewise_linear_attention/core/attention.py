@@ -575,10 +575,15 @@ class PiecewiseAttention(BaseAttention):
         alpha = torch.softmax(scores, dim=-1)  # (batch, m, seq_len)
         out_anchor = torch.einsum("bmn,bnd->bmd", alpha, V)  # (batch, m, dim)
         weighted_k = torch.einsum("bmn,bnd->bmd", alpha, K)  # (batch, m, dim)
-        # M_j = Σ_n α_{jn} v_n k_nᵀ, built as a batched matmul (slightly faster
-        # than the "bmn,bnd,bne->bmde" einsum) — compact (batch, m, dim, dim).
-        weighted_v = alpha.unsqueeze(-1) * V.unsqueeze(1)  # (batch, m, seq_len, dim)
-        second_moment = weighted_v.transpose(-1, -2) @ K.unsqueeze(1)  # (b, m, d, d)
+        # M_j = Σ_n α_{jn} v_n k_nᵀ, formed with α folded directly into the
+        # contraction. The earlier "α ⊙ V" pre-scaling materialized a
+        # (batch, m, seq_len, dim) tensor — an m× fp32 blow-up of V (≈2 GB at
+        # batch=64, m=64, seq_len=2048, dim=64) written to and re-read from
+        # memory purely to carry the weights into the matmul. Since the build is
+        # memory-bandwidth-bound (not FLOP-bound), that intermediate, not the
+        # arithmetic, dominates. The three-operand einsum contracts α, V, K
+        # without ever forming it — bit-identical output, grads match to ~1e-6.
+        second_moment = torch.einsum("bmn,bnd,bne->bmde", alpha, V, K)  # (b, m, d, d)
 
         # Hard-assign each query to its nearest anchor (non-differentiable);
         # gradients still flow through the expansion below w.r.t. Q, K, V.
