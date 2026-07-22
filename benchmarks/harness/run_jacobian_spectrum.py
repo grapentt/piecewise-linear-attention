@@ -293,7 +293,89 @@ def run_smoke(device):
     return out
 
 
-def run_real(models, corpus, layers, device):
+def capture_decoder_d128(model_id, corpus, layer, device, n_target=512, max_docs=16):
+    """Capture per-head Q/K/V from a real decoder LM whose head_dim is 128.
+
+    The BERT-encoder loader in the fidelity harness tops out at head_dim=64 (no
+    standard encoder is wider), but the paper's target per-head dim is 128. A
+    decoder LM such as ``EleutherAI/gpt-neo-1.3B`` (hidden 2048 / 16 heads = 128)
+    is a genuine trained model at that width, so its activations are a real
+    d=128 signal for the rank probe. This is deliberately standalone (does not
+    touch the BERT-specific ``load_real_activations``): it hooks the layer's
+    separate ``q_proj``/``k_proj``/``v_proj`` outputs and folds heads into the
+    batch axis, matching the harness's per-head convention.
+
+    Caveats recorded on the returned block: the model is a *decoder* (attention
+    is causal in the LM), but this probe measures only the *geometry* of Q/K/V —
+    the query-residual subspace and the operator spectrum — which does not depend
+    on the attention mask. It is a single native forward over real text of
+    ``n_target`` tokens (no cross-document tiling). Returned as a one-entry list of
+    ``(Q, K, V, dim)`` with provenance ``native_decoder``.
+    """
+    import os
+
+    os.environ.setdefault("HF_HUB_OFFLINE", "0")
+    try:
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+        import datasets
+    except Exception:
+        return None
+
+    tok = AutoTokenizer.from_pretrained(model_id)
+    model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=torch.float32)
+    model = model.eval().to(device)
+
+    # Locate the transformer block list and the requested layer's attention.
+    base = getattr(model, "transformer", getattr(model, "model", model))
+    blocks_attr = getattr(base, "h", getattr(base, "layers", None))
+    n_layers = len(blocks_attr)
+    layer = max(0, min(layer, n_layers - 1))
+    attn = blocks_attr[layer].attn
+    inner = getattr(attn, "attention", attn)  # gpt-neo wraps in .attention
+    num_heads = getattr(inner, "num_heads", None)
+    head_dim = getattr(inner, "head_dim", None)
+
+    # Real text: concatenate sentences until the token budget is reached.
+    try:
+        ds = datasets.load_dataset("opus_books", "de-en", split="train")
+        texts = [ex["translation"]["en"] for ex in ds.select(range(2000))]
+    except Exception:
+        return None
+    buf = ""
+    for t in texts:
+        buf += (" " + t)
+        if len(tok(buf)["input_ids"]) >= n_target:
+            break
+    ids = tok(buf, return_tensors="pt", truncation=True,
+              max_length=n_target)["input_ids"].to(device)
+
+    captured = {}
+
+    def mk(name):
+        def hook(_m, _in, out):
+            captured[name] = out.detach()
+        return hook
+
+    hs = [inner.q_proj.register_forward_hook(mk("q")),
+          inner.k_proj.register_forward_hook(mk("k")),
+          inner.v_proj.register_forward_hook(mk("v"))]
+    with torch.no_grad():
+        model(ids)
+    for h in hs:
+        h.remove()
+
+    def fold(x):  # (1, n, embed) -> (num_heads, n, head_dim)
+        n = x.shape[1]
+        return x.view(1, n, num_heads, head_dim).permute(0, 2, 1, 3).reshape(
+            num_heads, n, head_dim)
+
+    Q, K, V = fold(captured["q"]), fold(captured["k"]), fold(captured["v"])
+    return {"Q": Q, "K": K, "V": V, "dim": head_dim, "layer": layer,
+            "seq_len": Q.shape[1], "provenance": "native_decoder",
+            "model_id": model_id, "num_heads": num_heads}
+
+
+def run_real(models, corpus, layers, device, d128_model=None):
     all_rows = []
     for model_id in models:
         blocks = load_real_activations(
@@ -323,6 +405,31 @@ def run_real(models, corpus, layers, device):
                       f"op_rank@95 worst={row['op_rank95_worst']:.0f}/{dim} "
                       f"(frac {row['op_rank95_worst_frac']:.2f}) "
                       f"broadest_nuc={row.get('op_broadest_nucleus_frac', float('nan')):.2f}")
+
+    # Real d=128 signal from a decoder LM (the paper's target per-head dim, not
+    # reachable via any BERT encoder). Treated as native_decoder provenance.
+    if d128_model:
+        for layer in layers:
+            blk = capture_decoder_d128(d128_model, corpus, layer, device)
+            if blk is None:
+                print(f"SKIP_NO_SOURCE (d128): {d128_model}")
+                break
+            Q, K, V = blk["Q"].to(device), blk["K"].to(device), blk["V"].to(device)
+            dim = blk["dim"]
+            print(f"\n{d128_model} L{blk['layer']} n={blk['seq_len']} d={dim} "
+                  f"(bh={Q.shape[0]}) [decoder, causal LM — geometry probe]")
+            for row in probe_block(Q, K, V, dim):
+                row.update(model_id=d128_model, layer=blk["layer"],
+                           seq_len=blk["seq_len"], provenance="native_decoder")
+                all_rows.append(row)
+                print(f"  m={row['m']:3d}  "
+                      f"qres_d'@95 worst={row['qres_dprime95_worst']:.0f}/{dim} "
+                      f"(frac {row['qres_dprime95_worst_frac']:.2f})  "
+                      f"median={row['qres_dprime95_median']:.0f} "
+                      f"(frac {row['qres_dprime95_median_frac']:.2f})  |  "
+                      f"op_rank@95 worst={row['op_rank95_worst']:.0f}/{dim} "
+                      f"(frac {row['op_rank95_worst_frac']:.2f}) "
+                      f"broadest_nuc={row.get('op_broadest_nucleus_frac', float('nan')):.2f}")
     return all_rows
 
 
@@ -332,7 +439,7 @@ def _print_verdict(rows):
     print("\n" + "=" * 72)
     print("VERDICT — query-residual PCA d² lever (issue #9)")
     print("=" * 72)
-    real = [r for r in rows if r.get("provenance") == "native_concat"]
+    real = [r for r in rows if r.get("provenance") in ("native_concat", "native_decoder")]
     if not real:
         print("  no native real-activation rows — verdict deferred")
         return
@@ -386,6 +493,9 @@ def main(argv=None):
                              "bert-base-uncased"])
     ap.add_argument("--corpus", type=str, default="opus_books")
     ap.add_argument("--layers", nargs="+", type=int, default=[3, 6])
+    ap.add_argument("--d128-model", type=str, default=None,
+                    help="Real decoder LM with head_dim=128 for the d=128 rank "
+                         "signal (e.g. EleutherAI/gpt-neo-1.3B).")
     args = ap.parse_args(argv)
 
     device = torch.device(args.device)
@@ -394,7 +504,8 @@ def main(argv=None):
         _print_verdict([{**r, "provenance": "native_concat"} for r in rows])
         payload = {"mode": "smoke", "rows": rows}
     else:
-        rows = run_real(args.models, args.corpus, args.layers, device)
+        rows = run_real(args.models, args.corpus, args.layers, device,
+                        d128_model=args.d128_model)
         _print_verdict(rows)
         payload = {
             "mode": "real",
