@@ -537,17 +537,45 @@ def _largest_reference_n(lengths, batch, dtype, device):
     return fit
 
 
-def _accuracy_pass(methods, dim, dtype_name, ref_n, batch, seed, device):
+def _load_real_accuracy_qkv(model_id, layer, dim, dtype, device):
+    """Real per-head Q/K/V for the accuracy pass, captured from a trained decoder
+    LM at the requested head ``dim`` (reuses the jacobian-spectrum capture, which
+    hooks ``q_proj``/``k_proj``/``v_proj`` and folds heads into the batch axis).
+    Returns ``(Q, K, V, meta)`` at the model's native block length, or ``None`` if
+    the head dim does not match or the capture is unavailable (no hub / no model).
+
+    Accuracy on real activations is the meaningful signal: random Gaussian inputs
+    are the worst case for every approximation and compress the anchor dial to
+    noise. The native length (~512) differs from the latency sweep's ``n``; rel-err
+    is a per-vector geometric quantity that does not depend on sequence length, so
+    the join with long-``n`` latency is valid as long as the accuracy length is
+    reported honestly (it is, via the returned meta)."""
+    try:
+        from benchmarks.harness.run_jacobian_spectrum import capture_decoder_d128
+    except Exception:
+        return None
+    blk = capture_decoder_d128(model_id, corpus=None, layer=layer, device=device)
+    if blk is None or blk["dim"] != dim:
+        return None
+    Q = blk["Q"].to(device=device, dtype=dtype)
+    K = blk["K"].to(device=device, dtype=dtype)
+    V = blk["V"].to(device=device, dtype=dtype)
+    meta = {"provenance": "real_activation", "model_id": model_id,
+            "layer": blk["layer"], "seq_len": blk["seq_len"],
+            "batch_heads": Q.shape[0]}
+    return Q, K, V, meta
+
+
+def _accuracy_pass(methods, dim, dtype_name, Q, K, V, device):
     """Measure output accuracy of every method against exact softmax on ONE shared
-    input, at ``(batch, ref_n, dim)``. Non-causal only (the ground truth is dense
-    softmax). Every method — anchor configs and the fixed baselines alike — sees
-    the SAME seeded Q/K/V, so the rel-err numbers are directly comparable across
-    the whole frontier, unlike the separate real-activation harness. Returns a list
-    of ``{method, rel_err, status}`` rows. Softmax is the reference, so its own
-    rel_err is 0 by construction; if softmax OOMs at this ``ref_n`` the caller
-    should not have selected it."""
+    input ``(batch, n, dim)``. Non-causal only (the ground truth is dense softmax).
+    Every method — anchor configs and the fixed baselines alike — sees the SAME
+    Q/K/V, so the rel-err numbers are directly comparable across the whole frontier.
+    Returns a list of ``{method, rel_err, status}`` rows. Softmax is the reference,
+    so its own rel_err is 0 by construction; if softmax OOMs on this input the whole
+    pass returns a single ``oom`` reference row."""
     dtype = _DTYPES[dtype_name]
-    Q, K, V = _make_qkv(batch, ref_n, dim, dtype, device, seed, False)
+    n = Q.shape[1]
 
     # Exact softmax ground truth via the fair math-backend SDPA (fp32 internally
     # upcast in _relerr_to_reference regardless of dtype).
@@ -557,7 +585,6 @@ def _accuracy_pass(methods, dim, dtype_name, ref_n, batch, seed, device):
             ref_out, _ = ref_mod(Q, K, V)
         ref_out = ref_out.detach()
     except Exception as exc:  # noqa: BLE001
-        del Q, K, V
         if device.type == "cuda":
             torch.cuda.empty_cache()
         if _is_oom(exc):
@@ -573,7 +600,7 @@ def _accuracy_pass(methods, dim, dtype_name, ref_n, batch, seed, device):
             continue
         module = None
         try:
-            module = _build_method(method, dim, False, ref_n).to(
+            module = _build_method(method, dim, False, n).to(
                 device=device, dtype=dtype)
             with torch.no_grad():
                 out = module(Q, K, V)
@@ -590,7 +617,7 @@ def _accuracy_pass(methods, dim, dtype_name, ref_n, batch, seed, device):
             del module
             if device.type == "cuda":
                 torch.cuda.empty_cache()
-    del Q, K, V, ref_out
+    del ref_out
     if device.type == "cuda":
         torch.cuda.empty_cache()
     return acc_rows
@@ -618,10 +645,22 @@ def main(argv=None):
     parser.add_argument("--backward", action="store_true")
     parser.add_argument("--accuracy", action="store_true",
                         help="also measure output rel-err vs exact softmax on one "
-                             "shared input at a small batch where softmax fits.")
+                             "shared input (real activations if --acc-real, else "
+                             "random at a small batch where softmax fits).")
     parser.add_argument("--acc-batch", type=int, default=8,
-                        help="batch size for the accuracy reference pass (small so "
-                             "the dense softmax ground truth fits at long n).")
+                        help="batch size for the RANDOM accuracy reference pass "
+                             "(small so the dense softmax ground truth fits at "
+                             "long n). Ignored when --acc-real is set.")
+    parser.add_argument("--acc-real", action="store_true",
+                        help="use real trained-model activations for the accuracy "
+                             "pass (the meaningful signal; random inputs are the "
+                             "worst case for every method and flatten the dial). "
+                             "Captured at the model's native block length.")
+    parser.add_argument("--acc-model", type=str, default="EleutherAI/gpt-neo-1.3B",
+                        help="model id for --acc-real (head_dim must match a swept "
+                             "dim; gpt-neo-1.3B is head_dim 128).")
+    parser.add_argument("--acc-layer", type=int, default=6,
+                        help="decoder layer to capture for --acc-real.")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--out", type=str, default=None)
     parser.add_argument("--smoke", action="store_true")
@@ -654,6 +693,7 @@ def main(argv=None):
         args.backward = True
         args.accuracy = True
         args.acc_batch = 2
+        args.acc_real = False  # smoke has no GPU/model; random accuracy input
 
     set_seed(args.seed)
     device = get_device(args.device) if args.device == "auto" else torch.device(
@@ -680,32 +720,65 @@ def main(argv=None):
     ratios = _ratio_metrics(rows, args)
     print("\n" + verdict_string)
 
-    # Accuracy pass: exact-softmax rel-err for every method on ONE shared input, at
-    # the largest length where the dense softmax ground truth fits (probed at the
-    # small accuracy batch). Speed uses the full batch; accuracy uses --acc-batch so
-    # the O(n²) reference can reach long n. Reported per (dim, dtype); non-causal.
+    # Accuracy pass: exact-softmax rel-err for every method on ONE shared input,
+    # non-causal. With --acc-real the input is real trained-model activations at the
+    # model's native block length (the meaningful accuracy signal). Otherwise it is
+    # random Gaussian at --acc-batch and the largest length where the dense softmax
+    # ground truth fits (probed empirically). Random inputs are the worst case for
+    # every approximation, so --acc-real is the default for the write-up numbers.
     accuracy = {}
     if args.accuracy:
         acc_dtype = "bf16" if "bf16" in args.dtypes else args.dtypes[0]
         for dim in args.dims:
-            ref_n = _largest_reference_n(args.lengths, args.acc_batch,
-                                         _DTYPES[acc_dtype], device)
-            if ref_n is None:
-                print(f"\naccuracy(d={dim}): softmax OOMs even at smallest n; "
-                      f"accuracy skipped")
-                accuracy[str(dim)] = {"reference_n": None, "acc_batch": args.acc_batch,
-                                      "dtype": acc_dtype, "rows": []}
-                continue
-            print(f"\naccuracy(d={dim}, dtype={acc_dtype}, batch={args.acc_batch}, "
-                  f"softmax-ground-truth n={ref_n}):")
-            acc_rows = _accuracy_pass(args.methods, dim, acc_dtype, ref_n,
-                                      args.acc_batch, args.seed, device)
-            for ar in acc_rows:
+            if args.acc_real:
+                loaded = _load_real_accuracy_qkv(args.acc_model, args.acc_layer,
+                                                 dim, _DTYPES[acc_dtype], device)
+                if loaded is None:
+                    print(f"\naccuracy(d={dim}): real activations unavailable "
+                          f"(model/head-dim mismatch or no hub); accuracy skipped")
+                    accuracy[str(dim)] = {"reference_n": None, "input": "real",
+                                          "dtype": acc_dtype, "rows": [],
+                                          "meta": None}
+                    continue
+                Qa, Ka, Va, meta = loaded
+                ref_n = Qa.shape[1]
+                print(f"\naccuracy(d={dim}, dtype={acc_dtype}, input=real "
+                      f"{meta['model_id']} L{meta['layer']}, n={ref_n}, "
+                      f"bh={meta['batch_heads']}):")
+                acc_rows = _accuracy_pass(args.methods, dim, acc_dtype,
+                                          Qa, Ka, Va, device)
+                del Qa, Ka, Va
+                if device.type == "cuda":
+                    torch.cuda.empty_cache()
+                accuracy[str(dim)] = {"reference_n": ref_n, "input": "real",
+                                      "dtype": acc_dtype, "rows": acc_rows,
+                                      "meta": meta}
+            else:
+                ref_n = _largest_reference_n(args.lengths, args.acc_batch,
+                                             _DTYPES[acc_dtype], device)
+                if ref_n is None:
+                    print(f"\naccuracy(d={dim}): softmax OOMs even at smallest n; "
+                          f"accuracy skipped")
+                    accuracy[str(dim)] = {"reference_n": None, "input": "random",
+                                          "acc_batch": args.acc_batch,
+                                          "dtype": acc_dtype, "rows": []}
+                    continue
+                print(f"\naccuracy(d={dim}, dtype={acc_dtype}, input=random "
+                      f"batch={args.acc_batch}, softmax-ground-truth n={ref_n}):")
+                Qa, Ka, Va = _make_qkv(args.acc_batch, ref_n, dim,
+                                       _DTYPES[acc_dtype], device, args.seed, False)
+                acc_rows = _accuracy_pass(args.methods, dim, acc_dtype,
+                                          Qa, Ka, Va, device)
+                del Qa, Ka, Va
+                if device.type == "cuda":
+                    torch.cuda.empty_cache()
+                accuracy[str(dim)] = {"reference_n": ref_n, "input": "random",
+                                      "acc_batch": args.acc_batch,
+                                      "dtype": acc_dtype, "rows": acc_rows}
+            for ar in accuracy[str(dim)]["rows"]:
                 re = ar["rel_err"]
                 re_s = f"{re:.4f}" if re is not None else ar["status"]
                 print(f"    {ar['method']:22s} rel_err={re_s}")
-            accuracy[str(dim)] = {"reference_n": ref_n, "acc_batch": args.acc_batch,
-                                  "dtype": acc_dtype, "rows": acc_rows}
 
     metrics = {"verdict_pass": bool(verdict_pass)}
     for k, v in conds.items():
@@ -719,7 +792,9 @@ def main(argv=None):
             "methods": args.methods, "warmup": args.warmup, "repeats": args.repeats,
             "backward": args.backward, "seed": args.seed,
             "anchors": args.anchors, "accuracy": args.accuracy,
-            "acc_batch": args.acc_batch,
+            "acc_batch": args.acc_batch, "acc_real": args.acc_real,
+            "acc_model": (args.acc_model if args.acc_real else None),
+            "acc_layer": (args.acc_layer if args.acc_real else None),
             "performer_features": _PERFORMER_FEATURES,
             "nystrom_landmarks": _NYSTROM_LANDMARKS, "linformer_k": _LINFORMER_K,
             "luna_pack": _LUNA_PACK,
