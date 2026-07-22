@@ -397,6 +397,7 @@ class PiecewiseAttention(BaseAttention):
         causal: bool = False,
         causal_pseudo_query: str = "mean",
         anchor_strategy: Optional["AnchorStrategy"] = None,
+        diagonal_only: bool = False,
     ):
         """Initialize piecewise attention.
 
@@ -416,10 +417,17 @@ class PiecewiseAttention(BaseAttention):
                            around its nearest anchor (non-causal mode only). When
                            ``None`` or single-anchor, the original single-anchor
                            behavior is used unchanged.
+            diagonal_only: If True, drop the mean-field (softmax-covariance)
+                           term ``v̄ ⊗ k̄`` from the Jacobian, retaining only the
+                           uncentered second moment ``Σ_i α_i (v_i ⊗ k_i)``. This
+                           is an ablation switch, not a diagonal approximation: the
+                           retained term is still a full dense ``(dim, dim)`` matrix.
+                           Default False keeps the exact analytic Jacobian.
         """
         super().__init__(dim, dropout)
         self.scale = scale
         self.causal = causal
+        self.diagonal_only = diagonal_only
         self.causal_pseudo_query = causal_pseudo_query
         if causal_pseudo_query not in ("mean", "first"):
             raise ValueError(
@@ -498,8 +506,13 @@ class PiecewiseAttention(BaseAttention):
         # Outer product of weighted sums: (batch, dim, dim)
         outer_weighted = output.unsqueeze(-1) @ weighted_k.unsqueeze(1)
 
-        # Combine to get Jacobian
-        jacobian = scale_factor * (weighted_outer - outer_weighted)
+        # Combine to get Jacobian. When diagonal_only is set, the mean-field
+        # term v̄ ⊗ k̄ is dropped (ablation); the retained weighted_outer is
+        # still a full dense (batch, dim, dim) matrix, not a diagonal.
+        if self.diagonal_only:
+            jacobian = scale_factor * weighted_outer
+        else:
+            jacobian = scale_factor * (weighted_outer - outer_weighted)
 
         return output, jacobian
 
