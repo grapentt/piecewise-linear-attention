@@ -1,0 +1,185 @@
+{
+  "config": {
+    "anchors": 64,
+    "benchmark": "operator_rank_fidelity",
+    "layers": [
+      6,
+      12,
+      18
+    ],
+    "model": "EleutherAI/gpt-neo-1.3B",
+    "nystrom_floor": 0.0285,
+    "ranks": [
+      36,
+      40,
+      50,
+      52
+    ]
+  },
+  "environment": {
+    "device": "cuda",
+    "gpu": "NVIDIA A100 80GB PCIe",
+    "platform": "Linux-6.8.0-1059-azure-x86_64-with-glibc2.35",
+    "torch": "2.1.2+cu121"
+  },
+  "history": {
+    "metrics": {
+      "min_passing_rank": -1,
+      "nystrom_floor": 0.0285,
+      "worst_relerr_r36": 0.2632269263267517,
+      "worst_relerr_r40": 0.22260740399360657,
+      "worst_relerr_r50": 0.16438527405261993,
+      "worst_relerr_r52": 0.15072603523731232
+    },
+    "params": {
+      "anchors": 64,
+      "layers": [
+        6,
+        12,
+        18
+      ],
+      "model": "EleutherAI/gpt-neo-1.3B",
+      "nystrom_floor": 0.0285,
+      "ranks": [
+        36,
+        40,
+        50,
+        52
+      ]
+    },
+    "rows": [
+      {
+        "anchors": 64,
+        "cluster_size_median": 13.0,
+        "dim": 128,
+        "heads": 16,
+        "label": "EleutherAI/gpt-neo-1.3B_L6",
+        "n_occupied_clusters": 402,
+        "operator_energy_rank99_median": 2.0,
+        "operator_energy_rank99_worst": 36.0,
+        "per_rank": [
+          {
+            "delivered_relerr_median": 0.0253152959048748,
+            "delivered_relerr_worst": 0.1590391844511032,
+            "n_clusters": 402,
+            "rank": 36,
+            "rank_frac": 0.28125
+          },
+          {
+            "delivered_relerr_median": 0.0218308474868536,
+            "delivered_relerr_worst": 0.13980376720428467,
+            "n_clusters": 402,
+            "rank": 40,
+            "rank_frac": 0.3125
+          },
+          {
+            "delivered_relerr_median": 0.014964574947953224,
+            "delivered_relerr_worst": 0.09925549477338791,
+            "n_clusters": 402,
+            "rank": 50,
+            "rank_frac": 0.390625
+          },
+          {
+            "delivered_relerr_median": 0.01386041846126318,
+            "delivered_relerr_worst": 0.09364449977874756,
+            "n_clusters": 402,
+            "rank": 52,
+            "rank_frac": 0.40625
+          }
+        ],
+        "seq_len": 512
+      },
+      {
+        "anchors": 64,
+        "cluster_size_median": 11.0,
+        "dim": 128,
+        "heads": 16,
+        "label": "EleutherAI/gpt-neo-1.3B_L12",
+        "n_occupied_clusters": 479,
+        "operator_energy_rank99_median": 29.0,
+        "operator_energy_rank99_worst": 52.0,
+        "per_rank": [
+          {
+            "delivered_relerr_median": 0.10969904810190201,
+            "delivered_relerr_worst": 0.2632269263267517,
+            "n_clusters": 479,
+            "rank": 36,
+            "rank_frac": 0.28125
+          },
+          {
+            "delivered_relerr_median": 0.0964365229010582,
+            "delivered_relerr_worst": 0.22260740399360657,
+            "n_clusters": 479,
+            "rank": 40,
+            "rank_frac": 0.3125
+          },
+          {
+            "delivered_relerr_median": 0.0709540992975235,
+            "delivered_relerr_worst": 0.16438527405261993,
+            "n_clusters": 479,
+            "rank": 50,
+            "rank_frac": 0.390625
+          },
+          {
+            "delivered_relerr_median": 0.06727369129657745,
+            "delivered_relerr_worst": 0.15072603523731232,
+            "n_clusters": 479,
+            "rank": 52,
+            "rank_frac": 0.40625
+          }
+        ],
+        "seq_len": 512
+      },
+      {
+        "anchors": 64,
+        "cluster_size_median": 12.0,
+        "dim": 128,
+        "heads": 16,
+        "label": "EleutherAI/gpt-neo-1.3B_L18",
+        "n_occupied_clusters": 444,
+        "operator_energy_rank99_median": 23.0,
+        "operator_energy_rank99_worst": 39.0,
+        "per_rank": [
+          {
+            "delivered_relerr_median": 0.10814981907606125,
+            "delivered_relerr_worst": 0.19964633882045746,
+            "n_clusters": 444,
+            "rank": 36,
+            "rank_frac": 0.28125
+          },
+          {
+            "delivered_relerr_median": 0.09717033058404922,
+            "delivered_relerr_worst": 0.1759832799434662,
+            "n_clusters": 444,
+            "rank": 40,
+            "rank_frac": 0.3125
+          },
+          {
+            "delivered_relerr_median": 0.0726923793554306,
+            "delivered_relerr_worst": 0.1340474933385849,
+            "n_clusters": 444,
+            "rank": 50,
+            "rank_frac": 0.390625
+          },
+          {
+            "delivered_relerr_median": 0.06819193810224533,
+            "delivered_relerr_worst": 0.12881183624267578,
+            "n_clusters": 444,
+            "rank": 52,
+            "rank_frac": 0.40625
+          }
+        ],
+        "seq_len": 512
+      }
+    ]
+  },
+  "metrics": {
+    "min_passing_rank": -1,
+    "nystrom_floor": 0.0285,
+    "worst_relerr_r36": 0.2632269263267517,
+    "worst_relerr_r40": 0.22260740399360657,
+    "worst_relerr_r50": 0.16438527405261993,
+    "worst_relerr_r52": 0.15072603523731232
+  },
+  "schema_version": 1
+}
