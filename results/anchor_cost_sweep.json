@@ -1,0 +1,37 @@
+{
+  "config": {
+    "benchmark": "anchor_cost_sweep",
+    "purpose": "wall-clock of piecewise_kmeans apply vs anchor count m and head dim d, against performer/nystrom/softmax; isolates the O(batch*m*n*d^2) apply term the accuracy-competitive m>=16 configs pay",
+    "batch_bh": 64,
+    "dims": [64, 128],
+    "anchors": [1, 4, 16, 64],
+    "lengths": [512, 1024, 2048],
+    "warmup": 3,
+    "repeats": 8,
+    "performer_num_features": 256,
+    "nystrom_num_landmarks": 64
+  },
+  "environment": {
+    "device": "cpu",
+    "platform": "macOS-26.5.1-arm64-arm-64bit",
+    "torch": "2.10.0"
+  },
+  "history": {
+    "grid": [
+      {"dim": 64, "seq_len": 512, "wall_ms": {"standard": 8.456, "performer": 8.634, "nystrom_L64": 8.337, "piecewise_mean": 1.755, "piecewise_kmeans_m4": 12.947, "piecewise_kmeans_m16": 32.225, "piecewise_kmeans_m64": 98.570}},
+      {"dim": 64, "seq_len": 1024, "wall_ms": {"standard": 34.463, "performer": 17.446, "nystrom_L64": 11.621, "piecewise_mean": 3.633, "piecewise_kmeans_m4": 28.127, "piecewise_kmeans_m16": 61.583, "piecewise_kmeans_m64": 187.508}},
+      {"dim": 64, "seq_len": 2048, "wall_ms": {"standard": 100.695, "performer": 39.689, "nystrom_L64": 19.231, "piecewise_mean": 6.887, "piecewise_kmeans_m4": 52.696, "piecewise_kmeans_m16": 106.844, "piecewise_kmeans_m64": 347.468}},
+      {"dim": 128, "seq_len": 512, "wall_ms": {"standard": 11.790, "performer": 12.965, "nystrom_L64": 10.161, "piecewise_mean": 4.378, "piecewise_kmeans_m4": 29.329, "piecewise_kmeans_m16": 63.217, "piecewise_kmeans_m64": 207.607}},
+      {"dim": 128, "seq_len": 1024, "wall_ms": {"standard": 31.644, "performer": 22.009, "nystrom_L64": 14.918, "piecewise_mean": 8.013, "piecewise_kmeans_m4": 47.805, "piecewise_kmeans_m16": 112.095, "piecewise_kmeans_m64": 380.305}},
+      {"dim": 128, "seq_len": 2048, "wall_ms": {"standard": 110.333, "performer": 41.693, "nystrom_L64": 23.209, "piecewise_mean": 14.216, "piecewise_kmeans_m4": 83.599, "piecewise_kmeans_m16": 214.817, "piecewise_kmeans_m64": 1854.513}}
+    ]
+  },
+  "metrics": {
+    "note": "ratio>1 means piecewise slower than the named baseline; m>=16 uses batch_heads reduced internally in the fidelity probe but here all run at bh=64",
+    "pw_mean_over_performer": {"d64_n512": 0.20, "d64_n1024": 0.21, "d64_n2048": 0.17, "d128_n512": 0.34, "d128_n1024": 0.36, "d128_n2048": 0.34},
+    "m64_over_m1_slowdown": {"d64_n512": 56.2, "d64_n1024": 51.6, "d64_n2048": 50.5, "d128_n512": 47.4, "d128_n1024": 47.5, "d128_n2048": 130.5},
+    "m64_over_performer": {"d64_n512": 11.42, "d64_n1024": 10.75, "d64_n2048": 8.75, "d128_n512": 16.01, "d128_n1024": 17.28, "d128_n2048": 44.48},
+    "m16_over_performer": {"d64_n512": 3.73, "d64_n1024": 3.53, "d64_n2048": 2.69, "d128_n512": 4.88, "d128_n1024": 5.09, "d128_n2048": 5.15}
+  },
+  "schema_version": 1
+}
