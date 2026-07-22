@@ -314,7 +314,11 @@ def capture_decoder_d128(model_id, corpus, layer, device, n_target=512, max_docs
     """
     import os
 
-    os.environ.setdefault("HF_HUB_OFFLINE", "0")
+    # The BERT loader may have set HF_HUB_OFFLINE=1 during its own attempts;
+    # this decoder capture needs the hub, so force online explicitly (not
+    # setdefault, which cannot override an already-set value).
+    os.environ["HF_HUB_OFFLINE"] = "0"
+    os.environ["TRANSFORMERS_OFFLINE"] = "0"
     try:
         from transformers import AutoModelForCausalLM, AutoTokenizer
         import datasets
