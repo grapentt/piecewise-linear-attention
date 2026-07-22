@@ -43,10 +43,6 @@ from pathlib import Path
 # Allow running directly from a source checkout without installation.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import torch
 
 from piecewise_linear_attention.core.anchors import StrideAnchor
@@ -348,6 +344,13 @@ def compute_verdict(rows, dims):
 
 
 def make_figures(rows, dims, dispersions, out_path):
+    # matplotlib is a benchmark-only dependency; import lazily so the module
+    # (and its tested helpers) load without it.
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
     figs = []
     # F1: rel-err vs dispersion, one column per d, faceted by n, line per variant.
     lengths = sorted({r["seq_len"] for r in rows})
