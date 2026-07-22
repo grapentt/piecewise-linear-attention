@@ -167,6 +167,56 @@ def chunked_softmax_reference(Q, K, V, row_chunk=1024):
     return out
 
 
+# Cumulative-mass thresholds and pooled summary stats for the nucleus measure.
+NUCLEUS_PS = (0.9, 0.99, 0.999)
+NUCLEUS_TAGS = {0.9: "p90", 0.99: "p99", 0.999: "p999"}
+NUCLEUS_STATS = ("maxfrac", "p95frac", "medfrac", "meanfrac")
+
+
+def measure_nucleus_sizes(anchors, K, ps=NUCLEUS_PS):
+    """Per-anchor nucleus fractions at each threshold p, mirroring the shipped
+    top-p build rule exactly (``PiecewiseAttention._build_jacobian_factors_topp``).
+
+    Recomputes the per-anchor softmax the same way ``_compute_multi_anchor`` does
+    (``scores = einsum('bmd,bnd->bmn', anchors, K) / sqrt(dim)``; softmax over
+    keys), then counts, per anchor, the smallest set of top-weighted keys whose
+    cumulative softmax mass reaches ``p`` -- *including* the key that crosses the
+    threshold (keep where the *preceding* cumsum ``< p``). The first key is always
+    kept, so the count is in ``[1, n]``. Weights are not renormalized (irrelevant
+    to the count). This is the size ``t`` the top-p build's batched cap would use.
+
+    All math is float32 to match the library's fp32 discipline and to keep the
+    ``< p`` boundary deterministic at the crossing key. No gather/matmul is done --
+    only the counts that would determine the build's ``t``.
+
+    Args:
+        anchors: (b, m, d) anchor tensor (k-means centroids, or the m=1 mean).
+        K:       (b, n, d) key tensor.
+        ps:      iterable of cumulative-mass thresholds.
+
+    Returns:
+        dict[float, torch.Tensor]: ``p -> (b, m)`` float32 CPU tensor of nucleus
+        *fractions* (count / n), one entry per (batch, anchor).
+    """
+    anchors = anchors.float()
+    Kf = K.float()
+    dim = anchors.shape[-1]
+    scale = 1.0 / math.sqrt(dim)
+    scores = torch.einsum("bmd,bnd->bmn", anchors, Kf) * scale  # (b, m, n)
+    alpha = torch.softmax(scores, dim=-1)  # (b, m, n)
+    n = alpha.shape[-1]
+
+    sorted_alpha, _ = torch.sort(alpha, dim=-1, descending=True)  # (b, m, n)
+    cumulative = sorted_alpha.cumsum(dim=-1)
+    out = {}
+    for p in ps:
+        keep = torch.ones_like(sorted_alpha, dtype=torch.bool)
+        keep[..., 1:] = cumulative[..., :-1] < p  # library rule; crossing key kept
+        counts = keep.sum(dim=-1)  # (b, m), in [1, n]
+        out[p] = (counts.float() / n).detach().cpu()  # (b, m) fractions on CPU
+    return out
+
+
 def excess_kurtosis(Q):
     """Mean per-feature excess kurtosis of the query cloud (report-only).
 
@@ -471,6 +521,46 @@ def run_grid(blocks, model_id, dim, layers, lengths, device, batch_heads_cap):
                 idx = torch.topk(disp_vec, k).indices
                 top10 = float(e[idx].mean())
 
+            # Nucleus-size measurement (piecewise only; purely observational).
+            # Measures the per-anchor softmax nucleus that the top-p build would
+            # truncate to -- the sequence-axis shrink ceiling for the build cost.
+            # Needs only anchors + K (no second module forward): k-means
+            # anchor_strategy.select is deterministic and reproduces the module's
+            # own anchors; the m=1 "piecewise" path has no strategy (its anchor is
+            # the query mean), and its dense forward does not use build_topp, so
+            # its nucleus is diagnostic-only (nucleus_applies_to_build=0).
+            nucleus_fields = {f"nucleus_{t}_{s}": float("nan")
+                              for t in NUCLEUS_TAGS.values() for s in NUCLEUS_STATS}
+            nucleus_fields.update(nucleus_n_used=float("nan"),
+                                  nucleus_m_effective=float("nan"),
+                                  nucleus_n_anchors=float("nan"),
+                                  nucleus_applies_to_build=float("nan"))
+            if method in PIECEWISE_METHODS and not skipped:
+                try:
+                    with torch.no_grad():
+                        strat = getattr(module, "anchor_strategy", None)
+                        if strat is None:  # m=1 plain piecewise (mean anchor)
+                            anchors = Q.mean(dim=1, keepdim=True)  # (bh, 1, d)
+                            applies = 0.0
+                        else:  # k-means; deterministic re-select matches the module
+                            anchors = strat.select(Q)  # (bh, m, d)
+                            applies = 1.0
+                        fracs = measure_nucleus_sizes(anchors, K)  # {p: (bh, m) cpu}
+                    m_eff = anchors.shape[1]
+                    nucleus_fields["nucleus_n_used"] = float(K.shape[1])
+                    nucleus_fields["nucleus_m_effective"] = float(m_eff)
+                    nucleus_fields["nucleus_n_anchors"] = float(bh * m_eff)
+                    nucleus_fields["nucleus_applies_to_build"] = applies
+                    for p, f in fracs.items():
+                        flat = f.reshape(-1)  # already CPU fp32
+                        tag = NUCLEUS_TAGS[p]
+                        nucleus_fields[f"nucleus_{tag}_maxfrac"] = float(flat.max())
+                        nucleus_fields[f"nucleus_{tag}_p95frac"] = float(torch.quantile(flat, 0.95))
+                        nucleus_fields[f"nucleus_{tag}_medfrac"] = float(flat.median())
+                        nucleus_fields[f"nucleus_{tag}_meanfrac"] = float(flat.mean())
+                except (RuntimeError, MemoryError) as exc:  # keep the rel-err row
+                    print(f"  NUCLEUS-SKIP {method} n={seq_len} L{layer}: {type(exc).__name__}")
+
             rows.append({
                 "model_id": model_id, "attn_dim": dim,
                 "method": method, "seq_len": seq_len, "layer": layer,
@@ -485,6 +575,7 @@ def run_grid(blocks, model_id, dim, layers, lengths, device, batch_heads_cap):
                 "rel_err_p95": summary["p95"], "rel_err_p99": summary["p99"],
                 "rel_err_frobenius": fro, "rel_err_top10pct_dispersion_bucket": top10,
                 "last_num_landmarks": NYSTROM_LANDMARKS.get(method),
+                **nucleus_fields,
             })
             tag = "SKIP" if skipped else f"mean={summary['mean']:.3f} p95={summary['p95']:.3f}"
             print(f"  n={seq_len:5d} L{layer} {method:20s} {tag}")
@@ -673,6 +764,78 @@ def make_figures(rows, out_path):
     return figs
 
 
+def _nucleus_summary(rows):
+    """Roll up the per-row nucleus measurement into an honest report block.
+
+    The shipped top-p build uses a single batched cap ``t = max_j |nucleus_j|``,
+    so the sequence-axis build shrink is bounded by ``1 / maxfrac`` (never
+    ``1 / meanfrac`` -- a mean-based number is unrealizable by the one-matmul
+    build). We report, per (method, provenance) on the worst mid layer:
+
+      - the worst-anchor nucleus fraction at each threshold (``maxfrac``), and the
+        derived build-axis shrink ceiling ``1 / maxfrac`` (a FLOP ratio, NOT a
+        measured speedup -- the top-p path also pays a sort + two gathers), and
+      - ``meanfrac`` beside it purely to expose how much ``1 / meanfrac`` would
+        overstate the achievable shrink.
+
+    Native ``n=512`` (``is_real``) is the only trustworthy peakedness signal; the
+    ``tiled_proxy`` rows flatten the attention landscape with a sign that differs
+    by anchor family, so they are reported separately and never treated as a
+    bound. ``m=1`` is diagnostic-only (its dense forward ignores ``build_topp``).
+
+    Returns a dict keyed by ``(method, provenance)`` for the JSON, and is also the
+    source for the printed nucleus block.
+    """
+    out = {}
+    provs = sorted({r["n_provenance"] for r in rows})
+    for method in PIECEWISE_METHODS:
+        for prov in provs:
+            cands = [r for r in rows
+                     if r["method"] == method and r["n_provenance"] == prov
+                     and not r["skipped"]
+                     and not math.isnan(r.get("nucleus_p99_maxfrac", float("nan")))]
+            if not cands:
+                continue
+            # Worst (largest) nucleus layer per length, then the worst length --
+            # the pessimistic cell the batched cap would actually size to.
+            worst = max(cands, key=lambda r: r["nucleus_p99_maxfrac"])
+            entry = {
+                "seq_len": worst["seq_len"], "layer": worst["layer"],
+                "is_real": worst["is_real"], "n_used": worst["nucleus_n_used"],
+                "n_anchors": worst["nucleus_n_anchors"],
+                "applies_to_build": worst["nucleus_applies_to_build"],
+            }
+            for tag in NUCLEUS_TAGS.values():
+                entry[f"{tag}_maxfrac"] = worst[f"nucleus_{tag}_maxfrac"]
+                entry[f"{tag}_meanfrac"] = worst[f"nucleus_{tag}_meanfrac"]
+            out[f"{method}|{prov}"] = entry
+    return out
+
+
+def _print_nucleus(nuc):
+    """Print the nucleus block with the mandated honesty caveats."""
+    if not nuc:
+        return
+    print("\n" + "-" * 72)
+    print("NUCLEUS (per-anchor softmax mass concentration; top-p build shrink ceiling)")
+    print("  shrink ceiling = 1 / maxfrac @p=0.99 -- a FLOP ratio, NOT a timed speedup.")
+    print("  cap is batched (t = max anchor), so mean-based shrink is unachievable.")
+    for key in sorted(nuc):
+        e = nuc[key]
+        method, prov = key.split("|", 1)
+        mx = e["p99_maxfrac"]
+        mn = e["p99_meanfrac"]
+        real = "native" if e["is_real"] else "PROXY(flattened; not a bound)"
+        applies = "" if e["applies_to_build"] == 1.0 else "  [m=1 diagnostic: build is dense]"
+        ceil = (1.0 / mx) if (isinstance(mx, float) and mx > 0) else float("nan")
+        overstate = (1.0 / mn) if (isinstance(mn, float) and mn > 0) else float("nan")
+        gate = "WIN-eligible" if (isinstance(mx, float) and mx <= 0.10) else "build reverts to ~dense"
+        print(f"  {method:22s} n={e['seq_len']:5d} L{e['layer']} [{real}]{applies}")
+        print(f"      maxfrac@0.99={mx:.3f} -> shrink<= {ceil:5.1f}x  ({gate}); "
+              f"mean-based {overstate:5.1f}x would overstate")
+    print("-" * 72)
+
+
 def _print_banner(metrics):
     print("\n" + "=" * 72)
     v = metrics["verdict"]
@@ -743,6 +906,7 @@ def main(argv=None):
         assert all(r["skipped"] or r["rel_err_mean"] >= 0.0 for r in rows)
         metrics = compute_verdict(rows, list(smoke_lengths))
         _print_banner(metrics)
+        _print_nucleus(_nucleus_summary(rows))
         print("smoke OK")
         return 0
 
@@ -809,6 +973,9 @@ def main(argv=None):
 
     metrics = compute_verdict(all_rows, args.lengths)
     _print_banner(metrics)
+    nucleus = _nucleus_summary(all_rows)
+    _print_nucleus(nucleus)
+    metrics = {**metrics, "nucleus": nucleus}
     figures = make_figures(all_rows, args.out or "real_activation_fidelity.json")
 
     result = ExperimentResult(
