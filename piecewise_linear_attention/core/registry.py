@@ -24,6 +24,9 @@ from typing import Callable, Dict, List
 from .attention import (
     BaseAttention,
     LinearAttention,
+    LinformerAttention,
+    LunaAttention,
+    NystromformerAttention,
     PerformerAttention,
     PiecewiseAttention,
     StandardAttention,
@@ -140,6 +143,40 @@ def _build_performer(
         causal=causal,
         seed=performer_seed,
     )
+
+
+@register_attention("nystromformer")
+def _build_nystromformer(
+    *, dim, dropout, causal, num_landmarks=64, pinv_iterations=6, eps=1e-8, **_ignored
+) -> BaseAttention:
+    """Nyströmformer landmark attention (Xiong et al., 2021).
+
+    No exact causal form; ``causal=True`` raises in the constructor.
+    """
+    return NystromformerAttention(
+        dim=dim,
+        dropout=dropout,
+        num_landmarks=num_landmarks,
+        pinv_iterations=pinv_iterations,
+        eps=eps,
+        causal=causal,
+    )
+
+
+@register_attention("linformer")
+def _build_linformer(*, dim, dropout, causal, max_seq_len=512, k=256, **_ignored) -> BaseAttention:
+    """Linformer low-rank sequence-projection attention (Wang et al., 2020).
+
+    Same-length-only baseline; requires ``max_seq_len`` at construction and has
+    no causal form.
+    """
+    return LinformerAttention(dim=dim, dropout=dropout, max_seq_len=max_seq_len, k=k, causal=causal)
+
+
+@register_attention("luna")
+def _build_luna(*, dim, dropout, causal, num_pack=256, **_ignored) -> BaseAttention:
+    """Luna nested pack/unpack attention (Ma et al., 2021)."""
+    return LunaAttention(dim=dim, dropout=dropout, num_pack=num_pack, causal=causal)
 
 
 @register_attention("piecewise")
