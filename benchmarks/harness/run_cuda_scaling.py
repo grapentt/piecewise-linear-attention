@@ -26,6 +26,16 @@ skipped in causal mode). The causal piecewise-mean path materialises a
 ``(batch, n, d, d)`` cumulative-sum tensor; that footprint is reported explicitly on
 those cells because it is the dominant long-context memory risk.
 
+The anchor count is a free hyperparameter of the piecewise method, so ``--anchors``
+sweeps an arbitrary set of ``m`` values (each run as ``piecewise_kmeans_m{k}``, with
+``m=1`` the mean-anchor fast path) against the fixed no-``m`` baselines on identical
+inputs — this maps where the accuracy↔latency↔memory dial lands and where the dense
+``(batch, m, d, d)`` build runs out of memory. With ``--accuracy`` the harness also
+measures each method's output relative error against an exact dense-softmax ground
+truth on one shared input, at a small ``--acc-batch`` where the ``O(n²)`` reference
+still fits at long ``n`` (probed empirically); where softmax cannot fit even at the
+smallest batch, accuracy is recorded as unavailable and only speed/memory is kept.
+
 Examples
 --------
 Smoke (CPU, seconds, self-checking)::
@@ -39,11 +49,13 @@ Full run (one GPU)::
         --dtypes fp32 bf16 --batch 256 --warmup 5 --repeats 30 \
         --modes noncausal causal --backward --out results/cuda_scaling.json
 
-Optional forward-only ``bf16`` pass first, to map the OOM boundaries quickly::
+Anchor sweep with accuracy at long context (one GPU)::
 
-    python benchmarks/harness/run_cuda_scaling.py --device cuda --dims 64 128 \
-        --lengths 1024 2048 4096 8192 16384 --dtypes bf16 --batch 256 \
-        --modes noncausal causal --out results/cuda_scaling_fwd_bf16.json
+    python benchmarks/harness/run_cuda_scaling.py \
+        --device cuda --dims 128 --lengths 8192 16384 \
+        --anchors 1 8 16 24 32 40 48 56 60 --dtypes fp32 bf16 \
+        --modes noncausal causal --backward --accuracy --acc-batch 8 \
+        --out results/cuda_scaling_anchors.json
 """
 
 import argparse
@@ -77,7 +89,10 @@ _KMEANS_ITERS = 3
 
 # The full method set. ``standard`` is the manual O(n^2) softmax already in the
 # repo (kept as a reference and to record where softmax OOMs); ``sdpa_math`` is the
-# fair softmax baseline the verdict compares against.
+# fair softmax baseline the verdict compares against. ``linear`` is plain (kernel-
+# free) linear attention, the other O(n·d²) point of comparison for piecewise-mean.
+# ``piecewise_kmeans_m{k}`` methods are generated dynamically from ``--anchors``;
+# the two below are the defaults kept for backward-compatible reruns.
 _ALL_METHODS = [
     "piecewise_mean",
     "piecewise_kmeans_m4",
@@ -86,9 +101,25 @@ _ALL_METHODS = [
     "nystromformer",
     "linformer",
     "luna",
+    "linear",
     "standard",
     "sdpa_math",
 ]
+
+# Non-anchor baselines (no ``m`` hyperparameter) — the fixed comparison set the
+# anchor sweep is measured against on identical inputs.
+_BASELINE_METHODS = [
+    "performer", "nystromformer", "linformer", "luna", "linear",
+    "standard", "sdpa_math",
+]
+
+
+def _kmeans_anchor_count(method):
+    """Anchor count ``m`` for a ``piecewise_kmeans_m{k}`` method name, else None."""
+    prefix = "piecewise_kmeans_m"
+    if method.startswith(prefix):
+        return int(method[len(prefix):])
+    return None
 
 # Methods with a working causal implementation. The others raise at construction
 # (Nyström/Linformer/Luna) or in the multi-anchor forward (k-means, m>1).
@@ -152,11 +183,9 @@ def _build_method(method, dim, causal, seq_len):
         return build_attention("linear", **common)
     if method == "piecewise_mean":
         return build_attention("piecewise", **common)
-    if method == "piecewise_kmeans_m4":
-        return build_attention("piecewise_kmeans", num_anchors=4,
-                               kmeans_iters=_KMEANS_ITERS, **common)
-    if method == "piecewise_kmeans_m64":
-        return build_attention("piecewise_kmeans", num_anchors=64,
+    m = _kmeans_anchor_count(method)
+    if m is not None:
+        return build_attention("piecewise_kmeans", num_anchors=m,
                                kmeans_iters=_KMEANS_ITERS, **common)
     if method == "performer":
         return build_attention("performer", num_features=_PERFORMER_FEATURES, **common)
@@ -278,11 +307,8 @@ def _analytic_flops(method, batch, n, dim, causal):
         return 8.0 * B * n * _LUNA_PACK * d
     if method == "piecewise_mean":
         return (5.0 if causal else 4.0) * B * n * d * d
-    if method == "piecewise_kmeans_m4":
-        m = 4
-        return 2.0 * B * m * n * d * d + 2.0 * (_KMEANS_ITERS + 1) * B * n * m * d
-    if method == "piecewise_kmeans_m64":
-        m = 64
+    m = _kmeans_anchor_count(method)
+    if m is not None:
         return 2.0 * B * m * n * d * d + 2.0 * (_KMEANS_ITERS + 1) * B * n * m * d
     return float("nan")
 
@@ -475,6 +501,101 @@ def _ratio_metrics(rows, args):
     return metrics
 
 
+def _relerr_to_reference(approx, exact, eps=1e-9):
+    """Mean per-vector relative L2 error over the (batch, n, dim) output, matching
+    the real-activation fidelity harness convention (``‖approx−exact‖/‖exact‖``
+    per query, averaged). Both tensors are upcast to fp32 first so the metric is
+    not itself limited by bf16 rounding."""
+    a = approx.detach().float()
+    e = exact.detach().float()
+    num = torch.linalg.norm(a - e, dim=-1)
+    den = torch.linalg.norm(e, dim=-1).clamp_min(eps)
+    return float((num / den).mean())
+
+
+def _largest_reference_n(lengths, batch, dtype, device):
+    """The largest ``n`` in ``lengths`` at which a dense ``(batch, n, n)`` softmax
+    reference actually fits, probed empirically (a real allocation, freed
+    immediately). Returns the ``n`` or ``None`` if even the smallest OOMs. The
+    accuracy pass uses this so the ground truth is exact softmax, never an
+    approximation of an approximation."""
+    if device.type != "cuda":
+        return max(lengths)
+    fit = None
+    for n in sorted(lengths):
+        try:
+            torch.cuda.empty_cache()
+            probe = torch.empty(batch, n, n, dtype=dtype, device=device)
+            del probe
+            torch.cuda.empty_cache()
+            fit = n
+        except Exception as exc:  # noqa: BLE001
+            if _is_oom(exc):
+                torch.cuda.empty_cache()
+                break
+            raise
+    return fit
+
+
+def _accuracy_pass(methods, dim, dtype_name, ref_n, batch, seed, device):
+    """Measure output accuracy of every method against exact softmax on ONE shared
+    input, at ``(batch, ref_n, dim)``. Non-causal only (the ground truth is dense
+    softmax). Every method — anchor configs and the fixed baselines alike — sees
+    the SAME seeded Q/K/V, so the rel-err numbers are directly comparable across
+    the whole frontier, unlike the separate real-activation harness. Returns a list
+    of ``{method, rel_err, status}`` rows. Softmax is the reference, so its own
+    rel_err is 0 by construction; if softmax OOMs at this ``ref_n`` the caller
+    should not have selected it."""
+    dtype = _DTYPES[dtype_name]
+    Q, K, V = _make_qkv(batch, ref_n, dim, dtype, device, seed, False)
+
+    # Exact softmax ground truth via the fair math-backend SDPA (fp32 internally
+    # upcast in _relerr_to_reference regardless of dtype).
+    ref_mod = _SdpaMathAttention(causal=False)
+    try:
+        with torch.no_grad():
+            ref_out, _ = ref_mod(Q, K, V)
+        ref_out = ref_out.detach()
+    except Exception as exc:  # noqa: BLE001
+        del Q, K, V
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
+        if _is_oom(exc):
+            return [{"method": "sdpa_math_reference", "rel_err": None,
+                     "status": "oom"}]
+        raise
+
+    acc_rows = []
+    for method in methods:
+        if method in ("standard", "sdpa_math"):
+            # Softmax methods are the reference; rel_err is 0 by definition.
+            acc_rows.append({"method": method, "rel_err": 0.0, "status": "ok"})
+            continue
+        module = None
+        try:
+            module = _build_method(method, dim, False, ref_n).to(
+                device=device, dtype=dtype)
+            with torch.no_grad():
+                out = module(Q, K, V)
+                out = out[0] if isinstance(out, tuple) else out
+            acc_rows.append({"method": method,
+                             "rel_err": _relerr_to_reference(out, ref_out),
+                             "status": "ok"})
+        except Exception as exc:  # noqa: BLE001
+            if _is_oom(exc):
+                acc_rows.append({"method": method, "rel_err": None, "status": "oom"})
+            else:
+                raise
+        finally:
+            del module
+            if device.type == "cuda":
+                torch.cuda.empty_cache()
+    del Q, K, V, ref_out
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
+    return acc_rows
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--device", type=str, default="cpu")
@@ -489,12 +610,32 @@ def main(argv=None):
     parser.add_argument("--modes", type=str, nargs="+", default=["noncausal", "causal"],
                         choices=["noncausal", "causal"])
     parser.add_argument("--methods", type=str, nargs="+", default=list(_ALL_METHODS),
-                        choices=list(_ALL_METHODS))
+                        help="method names; piecewise_kmeans_m{k} accepted for any k")
+    parser.add_argument("--anchors", type=int, nargs="+", default=None,
+                        help="anchor counts to sweep as piecewise_kmeans_m{k}; when "
+                             "set, these plus the baseline methods form the method "
+                             "list (m=1 maps to piecewise_mean).")
     parser.add_argument("--backward", action="store_true")
+    parser.add_argument("--accuracy", action="store_true",
+                        help="also measure output rel-err vs exact softmax on one "
+                             "shared input at a small batch where softmax fits.")
+    parser.add_argument("--acc-batch", type=int, default=8,
+                        help="batch size for the accuracy reference pass (small so "
+                             "the dense softmax ground truth fits at long n).")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--out", type=str, default=None)
     parser.add_argument("--smoke", action="store_true")
     args = parser.parse_args(argv)
+
+    # ``--anchors`` resolves to a method list: one piecewise config per anchor count
+    # (m=1 is the mean-anchor fast path, not k-means) plus the fixed baselines, so
+    # the anchor dial is measured against the same comparison set on every cell.
+    if args.anchors is not None:
+        anchor_methods = []
+        for m in args.anchors:
+            anchor_methods.append("piecewise_mean" if m == 1
+                                  else f"piecewise_kmeans_m{m}")
+        args.methods = anchor_methods + _BASELINE_METHODS
 
     if args.smoke:
         args.device = "cpu"
@@ -505,10 +646,14 @@ def main(argv=None):
         args.warmup = 1
         args.repeats = 2
         # Include one causal-unsupported baseline (luna) so the skip path is
-        # exercised, and one that materialises the causal cumsum state.
-        args.methods = ["piecewise_mean", "performer", "sdpa_math", "luna"]
+        # exercised, one that materialises the causal cumsum state (piecewise_mean),
+        # and a dynamic-anchor config (m=8) so the --anchors parsing path is covered.
+        args.methods = ["piecewise_mean", "piecewise_kmeans_m8", "performer",
+                        "sdpa_math", "luna"]
         args.modes = ["noncausal", "causal"]
         args.backward = True
+        args.accuracy = True
+        args.acc_batch = 2
 
     set_seed(args.seed)
     device = get_device(args.device) if args.device == "auto" else torch.device(
@@ -535,6 +680,33 @@ def main(argv=None):
     ratios = _ratio_metrics(rows, args)
     print("\n" + verdict_string)
 
+    # Accuracy pass: exact-softmax rel-err for every method on ONE shared input, at
+    # the largest length where the dense softmax ground truth fits (probed at the
+    # small accuracy batch). Speed uses the full batch; accuracy uses --acc-batch so
+    # the O(n²) reference can reach long n. Reported per (dim, dtype); non-causal.
+    accuracy = {}
+    if args.accuracy:
+        acc_dtype = "bf16" if "bf16" in args.dtypes else args.dtypes[0]
+        for dim in args.dims:
+            ref_n = _largest_reference_n(args.lengths, args.acc_batch,
+                                         _DTYPES[acc_dtype], device)
+            if ref_n is None:
+                print(f"\naccuracy(d={dim}): softmax OOMs even at smallest n; "
+                      f"accuracy skipped")
+                accuracy[str(dim)] = {"reference_n": None, "acc_batch": args.acc_batch,
+                                      "dtype": acc_dtype, "rows": []}
+                continue
+            print(f"\naccuracy(d={dim}, dtype={acc_dtype}, batch={args.acc_batch}, "
+                  f"softmax-ground-truth n={ref_n}):")
+            acc_rows = _accuracy_pass(args.methods, dim, acc_dtype, ref_n,
+                                      args.acc_batch, args.seed, device)
+            for ar in acc_rows:
+                re = ar["rel_err"]
+                re_s = f"{re:.4f}" if re is not None else ar["status"]
+                print(f"    {ar['method']:22s} rel_err={re_s}")
+            accuracy[str(dim)] = {"reference_n": ref_n, "acc_batch": args.acc_batch,
+                                  "dtype": acc_dtype, "rows": acc_rows}
+
     metrics = {"verdict_pass": bool(verdict_pass)}
     for k, v in conds.items():
         metrics[k] = (bool(v) if v is not None else False)
@@ -546,9 +718,12 @@ def main(argv=None):
             "dtypes": args.dtypes, "batch": args.batch, "modes": args.modes,
             "methods": args.methods, "warmup": args.warmup, "repeats": args.repeats,
             "backward": args.backward, "seed": args.seed,
+            "anchors": args.anchors, "accuracy": args.accuracy,
+            "acc_batch": args.acc_batch,
             "performer_features": _PERFORMER_FEATURES,
             "nystrom_landmarks": _NYSTROM_LANDMARKS, "linformer_k": _LINFORMER_K,
-            "luna_pack": _LUNA_PACK, "kmeans_anchors": [4, 64],
+            "luna_pack": _LUNA_PACK,
+            "kmeans_anchors": (args.anchors if args.anchors is not None else [4, 64]),
             "verdict_ref_dtype": ref_dtype,
         },
         metrics=metrics,
@@ -558,7 +733,8 @@ def main(argv=None):
             "gpu": torch.cuda.get_device_name(0) if device.type == "cuda" else None,
             "sdpa_backend": "math (flash+mem_efficient disabled)",
         },
-        history={"rows": rows, "verdict_string": verdict_string},
+        history={"rows": rows, "verdict_string": verdict_string,
+                 "accuracy": accuracy},
     )
 
     if args.out:
@@ -569,6 +745,14 @@ def main(argv=None):
         assert any(r["status"] == "ok" for r in rows), "no cell ran to completion"
         assert any(r["status"] == "skipped" for r in rows), \
             "expected causal-unsupported cells to be skipped"
+        assert any(_kmeans_anchor_count(r["method"]) is not None for r in rows), \
+            "expected a dynamic piecewise_kmeans_m{k} anchor method in the rows"
+        # Accuracy path produced comparable rel-err for the anchor config and a
+        # baseline against the softmax reference.
+        acc_all = [ar for blk in accuracy.values() for ar in blk["rows"]]
+        assert acc_all, "accuracy pass produced no rows"
+        assert any(ar["method"].startswith("piecewise") and ar["rel_err"] is not None
+                   for ar in acc_all), "no piecewise accuracy measured"
         print("smoke OK")
 
     return 0
