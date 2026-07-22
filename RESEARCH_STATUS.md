@@ -44,6 +44,24 @@ It narrowed but did not close the gap: `m=64` remains slower than Performer on
 CPU. The remaining floors are (a) building the compact operator is still
 `O(m·n·d²)`, and (b) the `d²` factor itself, which worsens at `d=128`.
 
+### Build-side top-p: measured, no structural win on real data
+
+An optional sparse-support build (`build_topp`, off by default) truncates each
+anchor's second-moment build to that anchor's **nucleus** — the top-weighted
+keys whose cumulative softmax mass reaches `p`. A nucleus-size measurement on
+real trained-model activations (native `n=512` blocks, the only trustworthy
+peakedness signal) shows the shipped **shared** cap — sized to the worst/most-
+diffuse) anchor and k-means anchors are query-side centroids, the worst-anchor
+nucleus stays near the full sequence (`~0.87–0.93` of the keys at `p=0.99`), so
+the build shrink ceiling is only `~1.08×` and the path correctly self-guards to
+dense. Anchors are query-side centroids, so at least one attends broadly across
+keys — the query-centroid null holds. The **median** anchor's nucleus is much
+smaller (`~0.3–0.6` at `p=0.99`), so a per-anchor (ragged) cap scaling with the
+mean rather than the max has a `~1.5–2.5×` build FLOP ceiling (larger at a looser
+`p=0.9`); whether that converts to a wall-clock win on GPU is an open follow-up
+(see below). Reproduced by the real-activation fidelity harness; distribution in
+`results/real_activation_fidelity_nucleus.json`.
+
 ## Accuracy
 
 Relative error to exact softmax, on two input regimes that give **opposite**
@@ -84,6 +102,10 @@ measurement at `d=64–128` (with bf16) is expected to recover.
   gate for the efficiency framing.
 - Whether the `d²` factor can be cut (structured / low-rank / diagonal Jacobian)
   while keeping the high-`m` fidelity gain.
+- Whether a per-anchor (ragged) build cap — scaling with the mean nucleus rather
+  than the worst-anchor max — converts its `~1.5–2.5×` build FLOP ceiling into a
+  measured wall-clock win on GPU (the batched-cap version does not; the median
+  nucleus is small but the max is not).
 - Real-data end-to-end task quality (LRA, translation) at realistic sizes.
 - Chunked causal cumsum so the `O(n·d²)` causal *memory* stays bounded at large
   `n·d`.

@@ -448,9 +448,16 @@ class PiecewiseAttention(BaseAttention):
                            crossover is around a nucleus of ~5–10% of the keys; above
                            that the sort/gather overhead makes it slower than the
                            dense build. It is therefore off by default and intended
-                           for distributions with concentrated attention — its value
-                           on real activations is an empirical question to measure,
-                           not an unconditional optimization.
+                           for distributions with concentrated attention.
+
+                           Measured on real trained-model activations, this shared
+                           per-batch cap does *not* pay off: because the cap is sized
+                           to the worst (most diffuse) anchor and k-means anchors are
+                           query-side centroids, the worst-anchor nucleus stays near
+                           the full sequence (~0.9 of the keys at ``p=0.99``), so it
+                           self-guards to the dense build. The median anchor's nucleus
+                           is much smaller, so a *per-anchor* (ragged) cap could still
+                           help — that is a separate, unimplemented build path.
         """
         super().__init__(dim, dropout)
         self.scale = scale
@@ -570,7 +577,9 @@ class PiecewiseAttention(BaseAttention):
         contraction stays one matmul; anchors with a smaller nucleus have their
         surplus slots zero-weighted and contribute nothing. When ``α`` is diffuse
         the nucleus grows to all ``seq_len`` keys and this reproduces the dense
-        build (up to float reassociation).
+        build (up to float reassociation) -- in that limit the gathered
+        ``(batch, m, t, dim)`` factors grow to ``(batch, m, seq_len, dim)``, so peak
+        *memory*, not just FLOPs, reverts to the dense cost.
 
         Args:
             alpha: Per-anchor softmax weights, shape (batch, m, seq_len).
