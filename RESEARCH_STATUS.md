@@ -122,25 +122,55 @@ exactly opposite the cost trend), and **shrinks as `m` grows** (tighter clusters
 smaller `Δq` subspace), strongest in the accurate `m=64` regime. The key/operator
 side stays broad on real data (the broadest anchor's softmax nucleus is ~0.99 of
 all keys at `d=128`), so key-side low-rank compression is *not* viable — the win
-is specifically on the query-residual axis. This greenlights building a
-per-anchor **ragged-`d'`** reduced operator (each anchor keeps its own `d'`,
-capturing the ~13× median; a shared basis is a ~3× conservative fallback). It is
-pure stock PyTorch, so it preserves the fair-baseline framing. **Caveat:** this
-establishes the rank *structure* only — whether the reduced FLOPs convert to a
-measured wall-clock win (and preserve `rel-err ≤ 0.24`) is the next test. Measured
-on an A100 (not H100); the structural verdict is hardware-independent, the eventual
-timing needs H100 confirmation. See issue #9 and
+is specifically on the query-residual axis. See issue #9 and
 `results/jacobian_spectrum_gpu_d128.json`.
+
+#### The reduced build is accurate but not faster: per-forward SVD kills it
+
+The per-anchor **ragged-`d'`** reduced operator was then built (behind an
+optional `build_reduced_d` flag: each anchor keeps its own `d'`, the residual
+basis `R_j` is the right singular vectors of that cluster's `Δq`, and `M_j` is
+built directly as the `(d, d')` factor `M_j^red`; fallbacks to the exact dense
+`M_j` on tiny clusters, SVD failures, and non-low-rank anchors, so it trades
+speed, never accuracy). Measured on the A100 at `d=128`, `m=64`, the result is a
+clean split — the structure is real and the approximation is accurate, but it is
+not a wall-clock win:
+
+- **Accuracy — passes with margin.** Reduced `p=0.99` rel-err to exact softmax on
+  real GPT-Neo-1.3B activations (native `n=512`, layers 6/12/18) is
+  `0.0022–0.0257`, within ~1.5–2× of the exact dense `m=64` build (`0.0012–0.0133`)
+  and **beating Nyström `L=256`** (`0.0285–0.0507`) at every layer. `p=0.95` is
+  looser (loses to Nyström at layer 6), so `p=0.99` is the operating point at
+  `d=128`. This confirms the low-rank query-residual structure end-to-end.
+- **Wall-clock — fails, decisively.** The reduced build runs **~200–800× slower**
+  than the dense build (build `x0.003`, forward `x0.005` at `d=128`, bf16 and
+  fp32). The cause is exactly the anticipated one: obtaining `R_j` needs a
+  per-anchor SVD of the residuals, i.e. `batch·m ≈ 512` tiny `torch.linalg.svd`
+  calls per forward in a Python loop, each with its own launch + host sync. This
+  swamps the theoretical build-FLOP saving (a real but irrelevant `~2–3×` ceiling).
+  There is no basis reuse in the independent-forward benchmark, so the SVD is paid
+  every forward.
+- **Memory — also not a win here** (`~0.68×`, i.e. reduced uses more): `R` and
+  `M_j^red` together, padded to the worst anchor's `d'_max`, exceed the single
+  compact dense `M`.
+
+Verdict: the reduced build is a **validated accuracy/structure result, not a
+speed lever** on current kernels. A wall-clock win would require either amortizing
+`R_j` (frozen anchors + cached basis — a different mode, absent here) or a batched
+SVD/randomized-range-finder that avoids the per-anchor Python loop. The flag ships
+off by default. Data: `results/reduced_build_a100.json` (time/memory/FLOP) and
+`results/reduced_accuracy_gate_d128.json` (accuracy). Measured on A100 (not H100);
+the accuracy verdict is hardware-independent.
 
 ## What is not yet established
 
 - GPU speed–accuracy Pareto at realistic per-head `d` (64–128) across
   `n∈{1k…16k}`, fp32 and bf16, forward and forward+backward — the existential
   gate for the efficiency framing.
-- Whether the confirmed query-residual low rank converts into a **measured
-  wall-clock** build speedup at `m=64` while keeping `rel-err ≤ 0.24` (the rank
-  *structure* is established above; the realized reduced build is not yet
-  implemented or timed).
+- Whether an SVD-free variant of the reduced build (amortized/cached `R_j` under
+  frozen anchors, or a batched randomized range-finder) can realize the confirmed
+  query-residual low rank as a wall-clock win. The straightforward per-forward
+  reduced build is accurate but ~200–800× slower (per-anchor SVD cost); see above.
 - Whether a per-anchor (ragged) build cap — scaling with the mean nucleus rather
   than the worst-anchor max — converts its `~1.5–2.5×` build FLOP ceiling into a
   measured wall-clock win on GPU (the batched-cap version does not; the median
