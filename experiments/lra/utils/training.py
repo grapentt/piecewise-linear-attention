@@ -6,7 +6,20 @@ import time
 import torch
 import torch.nn as nn
 from tqdm import tqdm
-from typing import Dict
+from typing import Dict, Optional
+from contextlib import nullcontext
+
+
+def _autocast_ctx(device: torch.device, amp_dtype: Optional[torch.dtype]):
+    """Autocast context for mixed precision, or a no-op when ``amp_dtype`` is None.
+
+    bf16 needs no ``GradScaler`` (it keeps fp32's exponent range), so the forward is
+    simply wrapped in ``torch.autocast`` while master weights stay fp32.
+    """
+    if amp_dtype is None:
+        return nullcontext()
+    device_type = device.type if isinstance(device, torch.device) else str(device)
+    return torch.autocast(device_type=device_type, dtype=amp_dtype)
 
 
 def train_epoch(
@@ -17,6 +30,7 @@ def train_epoch(
     device: torch.device,
     epoch: int,
     grad_clip: float = 1.0,
+    amp_dtype: Optional[torch.dtype] = None,
 ) -> Dict[str, float]:
     """Train for one epoch.
 
@@ -28,6 +42,9 @@ def train_epoch(
         device: Device to use
         epoch: Current epoch number
         grad_clip: Gradient clipping value
+        amp_dtype: If set (e.g. ``torch.bfloat16``), run the forward under
+            ``torch.autocast`` in that dtype; master weights stay fp32. ``None``
+            = full fp32.
 
     Returns:
         Dictionary of metrics (loss, accuracy, time, throughput)
@@ -48,10 +65,11 @@ def train_epoch(
 
         # Forward pass
         optimizer.zero_grad()
-        logits = model(input_ids, padding_mask)
-        loss = criterion(logits, labels)
+        with _autocast_ctx(device, amp_dtype):
+            logits = model(input_ids, padding_mask)
+            loss = criterion(logits, labels)
 
-        # Backward pass
+        # Backward pass (bf16 autocast needs no GradScaler)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
         optimizer.step()
@@ -88,6 +106,7 @@ def evaluate(
     eval_loader,
     criterion: nn.Module,
     device: torch.device,
+    amp_dtype: Optional[torch.dtype] = None,
 ) -> Dict[str, float]:
     """Evaluate model.
 
@@ -96,6 +115,8 @@ def evaluate(
         eval_loader: Evaluation data loader
         criterion: Loss function
         device: Device to use
+        amp_dtype: If set, run the forward under ``torch.autocast`` in that dtype
+            (matches the training precision). ``None`` = full fp32.
 
     Returns:
         Dictionary of metrics (loss, accuracy)
@@ -114,8 +135,9 @@ def evaluate(
             labels = batch['labels'].to(device)
 
             # Forward pass
-            logits = model(input_ids, padding_mask)
-            loss = criterion(logits, labels)
+            with _autocast_ctx(device, amp_dtype):
+                logits = model(input_ids, padding_mask)
+                loss = criterion(logits, labels)
 
             # Compute metrics
             predictions = logits.argmax(dim=-1)

@@ -127,6 +127,15 @@ def main():
         default=None,
         help="Weight decay (default: use config value of 1e-4)",
     )
+    parser.add_argument(
+        "--precision",
+        type=str,
+        default="fp32",
+        choices=["fp32", "bf16"],
+        help="Compute precision. 'bf16' runs the forward under torch.autocast "
+        "(fp32 master weights, no GradScaler needed); halves memory and speeds up "
+        "on tensor-core GPUs. 'fp32' (default) is full precision.",
+    )
     args = parser.parse_args()
 
     # Print configuration
@@ -165,6 +174,11 @@ def main():
 
     # Get device
     device = get_device(args.device)
+
+    # Resolve compute precision. bf16 uses torch.autocast (fp32 master weights);
+    # the -1e9 padding masks were verified to underflow cleanly in bf16.
+    amp_dtype = torch.bfloat16 if args.precision == "bf16" else None
+    print(f"  Precision: {args.precision}")
 
     # Adjust data directory for quick test to avoid conflicts
     data_dir = args.data_dir
@@ -252,6 +266,7 @@ def main():
                 device=device,
                 epoch=epoch,
                 grad_clip=config.grad_clip,
+                amp_dtype=amp_dtype,
             )
             train_history.append(train_metrics)
 
@@ -261,6 +276,7 @@ def main():
                 eval_loader=val_loader,
                 criterion=criterion,
                 device=device,
+                amp_dtype=amp_dtype,
             )
             val_history.append(val_metrics)
 
@@ -285,6 +301,7 @@ def main():
             eval_loader=test_loader,
             criterion=criterion,
             device=device,
+            amp_dtype=amp_dtype,
         )
 
         # Store results
@@ -292,6 +309,7 @@ def main():
             'attention_type': attention_type,
             'attn_kwargs': attn_kwargs,
             'padded_seq_len': model.position_embedding.num_embeddings,
+            'precision': args.precision,
             'config': config.to_dict(),
             'num_parameters': num_params,
             'train_history': train_history,
