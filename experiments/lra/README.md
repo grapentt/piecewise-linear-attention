@@ -18,6 +18,19 @@ masking the feature map `φ(K)` for the kernel methods, since a zeroed key row s
 leaves a non-zero softmax weight / `φ(0)` in the normalizer. This makes the
 comparison fair on both the accuracy and the padding-handling axes.
 
+To keep the budget honest for Nyström — whose segment-mean landmarks require the
+sequence length to be divisible by the landmark count — the encoder right-pads the
+(CLS-extended) sequence to a multiple of that count (`pad_to_multiple_of`), applied
+uniformly to every method so all train on the identical input. Without it, a
+near-prime task length (e.g. 2000 + 1 CLS = 2001) would silently collapse Nyström to
+far fewer landmarks than its peers' budget. The padded positions are masked, so they
+cannot affect any output (a registry-wide leak test in
+`piecewise_linear_attention/tests/test_key_padding_mask.py` locks this in — padded
+values must not change any valid-position output, on both the causal and non-causal
+paths). Note that `piecewise_kmeans`'s `num_anchors` is a linearization-granularity
+dial, **not** a rank/landmark budget, and is reported separately rather than under the
+shared budget.
+
 ### Quick Start
 
 ```bash

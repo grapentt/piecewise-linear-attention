@@ -226,8 +226,11 @@ class LinearAttention(BaseAttention):
 
         # Exclude padded keys by zeroing their feature rows. Must be applied to
         # φ(K), not raw K: φ(0) is nonzero, so masking raw K would still pollute
-        # the K_prime.sum normalizer below. Non-causal path only.
-        if key_padding_mask is not None and not self.causal:
+        # the K_prime.sum normalizer below. Zeroing K_prime is correct for BOTH
+        # the causal and non-causal paths: a zeroed row contributes nothing to the
+        # cumulative kv-product / normalizer sums or to the non-causal memory
+        # matrix, so padded keys drop out of every downstream aggregation.
+        if key_padding_mask is not None:
             K_prime = K_prime * key_padding_mask.unsqueeze(-1).to(K_prime.dtype)
 
         if self.causal:
@@ -392,8 +395,10 @@ class PerformerAttention(BaseAttention):
         # Exclude padded keys by zeroing their feature rows (φ(K), post-map, so the
         # +eps is stripped too). φ(0) is strictly positive here, so masking raw K
         # would leak into the normalizer; masking φ(K) removes padded keys from both
-        # numerator and denominator. Non-causal path only.
-        if key_padding_mask is not None and not self.causal:
+        # numerator and denominator. Zeroing K_prime is correct for BOTH paths: on
+        # the causal path a zeroed row drops out of the cumulative kv-product and
+        # normalizer sums, so padded keys cannot leak into later queries.
+        if key_padding_mask is not None:
             K_prime = K_prime * key_padding_mask.unsqueeze(-1).to(K_prime.dtype)
 
         if self.causal:
@@ -605,9 +610,9 @@ class PiecewiseAttention(BaseAttention):
             K: Key tensor of shape (batch, seq_len, dim)
             V: Value tensor of shape (batch, seq_len, dim)
             key_padding_mask: Optional bool ``(batch, seq_len)``, True=valid. Padded
-                key scores are set to ``-inf`` before the softmax so they receive
-                ~zero weight; the Jacobian factors below reuse ``attn_weights`` and
-                inherit the exclusion automatically.
+                key scores are set to a large negative value before the softmax so
+                they receive ~zero weight; the Jacobian factors below reuse
+                ``attn_weights`` and inherit the exclusion automatically.
 
         Returns:
             output: Attention output at pseudo-query, shape (batch, dim)
@@ -1069,7 +1074,8 @@ class PiecewiseAttention(BaseAttention):
             V: Value tensor of shape (batch, seq_len, dim)
             key_padding_mask: Optional bool ``(batch, key_len)``, True=valid. The
                 anchor weights are a softmax over the key axis (both single- and
-                multi-anchor), so padded key scores are set to ``-inf`` before that
+                multi-anchor), so padded key scores are set to a large negative
+                value before that
                 softmax and drop out of the anchor output *and* every Jacobian
                 factor (which reuse the same weights). Zeroing K/V rows would not
                 work — a zeroed key still gets ``exp(0)=1`` in the softmax
@@ -1089,8 +1095,14 @@ class PiecewiseAttention(BaseAttention):
 
             # Step 1: Select fixed anchor query q̄
             if self.causal_pseudo_query == "mean":
-                # Use mean of ALL queries (best for training with full sequence)
-                q_bar = Q.mean(dim=1)  # (batch, dim)
+                # Use mean of ALL queries (best for training with full sequence).
+                # With a key-padding mask, exclude padded queries so they cannot
+                # shift the shared anchor into every valid query's expansion.
+                if key_padding_mask is not None:
+                    w = key_padding_mask.unsqueeze(-1).to(Q.dtype)
+                    q_bar = (Q * w).sum(dim=1) / w.sum(dim=1).clamp(min=1.0)
+                else:
+                    q_bar = Q.mean(dim=1)  # (batch, dim)
             elif self.causal_pseudo_query == "first":
                 # Use first query (best for autoregressive inference)
                 q_bar = Q[:, 0, :]  # (batch, dim)
@@ -1099,6 +1111,12 @@ class PiecewiseAttention(BaseAttention):
             # Shape: (batch, seq_len)
             anchor_scores = (K @ q_bar.unsqueeze(-1)).squeeze(-1) * scale_factor
             s = torch.exp(anchor_scores)  # (batch, seq_len)
+
+            # Exclude padded keys: zero their weight s_j so they contribute nothing
+            # to the A/B/C/D cumsums below (and hence to any later valid query). This
+            # is the causal-path analogue of masking the non-causal softmax scores.
+            if key_padding_mask is not None:
+                s = s * key_padding_mask.to(s.dtype)
 
             # Step 3: Precompute cumsum terms (all independent of q_i!)
             # A_j = s_j * v_j  (weighted values)
@@ -1368,7 +1386,8 @@ class NystromformerAttention(BaseAttention):
         key_padding_mask:
             Optional bool ``(batch, key_len)``, True=valid. Nyström has two leaks
             for padded keys, both handled here: (1) ``kernel3`` softmaxes over the
-            key axis, so padded columns are set to ``-inf`` before that softmax;
+            key axis, so padded columns are set to a large negative value before
+            that softmax;
             (2) landmarks are contiguous segment *means* over the sequence, so a
             padded position would dilute its segment's landmark toward zero and
             corrupt every query's output globally — landmarks are therefore built
@@ -1736,7 +1755,8 @@ class LunaAttention(BaseAttention):
         key_padding_mask:
             Optional bool ``(batch, key_len)``, True=valid. Applied only to the
             Step-1 *pack* softmax (``scores1``, over the n keys), where padded
-            columns are set to ``-inf`` so they leave the packed summary ``Yp``.
+            columns are set to a large negative value so they leave the packed
+            summary ``Yp``.
             Step 2 softmaxes over the ``p`` summary vectors, which are already
             clean once ``Yp`` is, so it needs no masking. Zeroing K/V rows would
             not work: the pack softmax over keys still gives a zeroed column

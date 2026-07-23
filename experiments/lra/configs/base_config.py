@@ -57,10 +57,10 @@ class ListOpsConfig(LRAConfig):
 def attention_hparams(method: str, max_length: int, pooling_mode: str = "CLS") -> dict:
     """Matched-budget per-method attention hyperparameters for a fair comparison.
 
-    Every efficient baseline compresses the sequence to a fixed rank; sizing those
-    ranks comparably (all in the same ~128–256 ballpark) keeps the comparison fair
-    — no method is starved or over-provisioned relative to the others. The values
-    follow the widely used LRA configurations (Nyströmformer / Skyformer report
+    Every efficient baseline that *compresses the sequence* is sized to the same
+    rank budget (features / rank ``k`` / pack size / landmarks all ≈256), so no
+    method is starved or over-provisioned relative to the others. The values follow
+    the widely used LRA configurations (Nyströmformer / Skyformer report
     landmark/feature counts in this range for ListOps).
 
     Returns a dict suitable for ``LRAEncoder(attn_kwargs=...)`` / ``build_attention``.
@@ -75,33 +75,65 @@ def attention_hparams(method: str, max_length: int, pooling_mode: str = "CLS") -
     max_length:
         Task sequence length (before the CLS token).
     pooling_mode:
-        ``"CLS"`` adds one position, so the effective key length — and hence the
-        Linformer projection size — is ``max_length + 1``.
+        ``"CLS"`` adds one position, so the effective key length grows by one; use
+        :func:`encoder_seq_padding` to get the padded length the encoder actually
+        feeds to attention (see the Linformer / Nyström notes).
 
     Notes
     -----
-    - **Linformer** requires ``max_seq_len >= key_len`` (its sequence-axis
-      projection is defined only up to that length); it is set to the CLS-extended
-      length so the baseline builds instead of raising.
+    - **Linformer** requires ``max_seq_len >= key_len``; it is set to the *padded*
+      encoder length (see :func:`encoder_seq_padding`) so the projection covers
+      every position the encoder produces.
     - **Nyström** ``num_landmarks`` must divide the sequence length for an exact
-      segment-mean; the forward falls back to the largest divisor otherwise, so a
-      round value is used here.
+      segment mean. Rather than let an awkward task length (e.g. a near-prime
+      ``max_length + 1``) silently collapse it to far fewer landmarks than its
+      peers' budget, the encoder pads the sequence up to a multiple of
+      ``num_landmarks`` (:func:`encoder_seq_padding`); the padded positions are
+      masked, so Nyström gets its full ``NUM_LANDMARKS`` budget without leaking.
+    - **piecewise_kmeans** ``num_anchors`` is NOT the same quantity as a rank/
+      landmark budget: anchors set the piecewise-linearization *granularity*, and
+      each query still attends over all keys with a full-rank local Jacobian rather
+      than through a rank-``r`` sequence compression. It is therefore reported as
+      the method's own dial, not under the shared ``budget`` — do not read
+      ``num_anchors`` and ``budget`` as directly comparable capacities.
     """
-    key_len = max_length + 1 if pooling_mode == "CLS" else max_length
     budget = 256  # shared rank budget: features / rank k / pack size
     tables = {
         "standard": {},
         "linear": {},
         "performer": {"num_features": budget},
-        "nystromformer": {"num_landmarks": 128},
-        "linformer": {"k": budget, "max_seq_len": key_len},
+        "nystromformer": {"num_landmarks": NUM_LANDMARKS},
+        "linformer": {"k": budget, "max_seq_len": encoder_seq_padding(max_length, pooling_mode)},
         "luna": {"num_pack": budget},
-        # Multi-anchor k-means piecewise; anchor count is the method's own dial.
+        # Multi-anchor k-means piecewise; anchor count is the method's own dial
+        # (a linearization-granularity knob, NOT a rank budget — see Notes above).
         # Real-activation sweeps show m>1 is a genuine accuracy lever, so the
         # comparison uses a multi-anchor config rather than the single-anchor mean.
         "piecewise_kmeans": {"num_anchors": 16, "kmeans_iters": 3},
     }
     return dict(tables.get(method, {}))
+
+
+#: Nyström landmark budget for the fair ListOps comparison. Kept in the same ≈256
+#: ballpark as the other efficient methods' ranks; the encoder pads the sequence to
+#: a multiple of this so the segment-mean landmarks are exact and Nyström is not
+#: silently starved on an awkward (near-prime) sequence length.
+NUM_LANDMARKS = 128
+
+
+def encoder_seq_padding(max_length: int, pooling_mode: str = "CLS") -> int:
+    """Padded sequence length the LRA encoder feeds to attention.
+
+    The encoder right-pads the CLS-extended sequence up to a multiple of
+    :data:`NUM_LANDMARKS` (via ``LRAEncoder(pad_to_multiple_of=NUM_LANDMARKS)``) so
+    Nyström's segment-mean landmarks divide evenly. Padded positions are masked and
+    cannot affect any output. Returns the resulting length (== ``key_len`` when it
+    already divides, else rounded up).
+    """
+    key_len = max_length + 1 if pooling_mode == "CLS" else max_length
+    if key_len % NUM_LANDMARKS == 0:
+        return key_len
+    return ((key_len + NUM_LANDMARKS - 1) // NUM_LANDMARKS) * NUM_LANDMARKS
 
 
 #: Methods trained end-to-end in the fair ListOps comparison. Every mechanism's

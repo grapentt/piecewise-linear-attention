@@ -24,6 +24,7 @@ sys.path.insert(0, str(project_root))
 from experiments.lra.configs.base_config import (
     ListOpsConfig,
     LISTOPS_METHODS,
+    NUM_LANDMARKS,
     attention_hparams,
 )
 from experiments.lra.models.encoder import LRAEncoder
@@ -203,7 +204,10 @@ def main():
         if attn_kwargs:
             print(f"Attention hyperparameters: {attn_kwargs}")
 
-        # Create model
+        # Pad the (CLS-extended) sequence to a multiple of the Nyström landmark
+        # count so its segment-mean landmarks divide evenly. Applied uniformly to
+        # EVERY method (not just Nyström) so all methods train on the identical
+        # input; the padded positions are masked and cannot affect any output.
         model = LRAEncoder(
             vocab_size=vocab_size,
             max_seq_len=config.max_length,
@@ -216,6 +220,7 @@ def main():
             dropout=config.dropout,
             pooling_mode=config.pooling_mode,
             attn_kwargs=attn_kwargs,
+            pad_to_multiple_of=NUM_LANDMARKS,
             device=device,
         ).to(device)
 
@@ -286,6 +291,7 @@ def main():
         results = {
             'attention_type': attention_type,
             'attn_kwargs': attn_kwargs,
+            'padded_seq_len': model.position_embedding.num_embeddings,
             'config': config.to_dict(),
             'num_parameters': num_params,
             'train_history': train_history,

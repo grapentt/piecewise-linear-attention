@@ -38,6 +38,7 @@ class LRAEncoder(nn.Module):
         dropout: float = 0.1,
         pooling_mode: str = "CLS",
         attn_kwargs: Optional[Dict] = None,
+        pad_to_multiple_of: Optional[int] = None,
         device: Optional[torch.device] = None,
     ):
         """Initialize LRA encoder.
@@ -59,6 +60,14 @@ class LRAEncoder(nn.Module):
                 block's attention (e.g. ``num_features``/``num_landmarks``/``k``/
                 ``max_seq_len``/``num_pack``/``num_anchors``). ``None`` = registry
                 defaults.
+            pad_to_multiple_of: If set, the (CLS-extended) sequence fed to attention
+                is right-padded with masked positions up to the next multiple of
+                this value. This gives length-sensitive mechanisms a divisibility-
+                friendly sequence — notably Nyström, whose segment-mean landmarks
+                require ``seq_len % num_landmarks == 0`` (an awkward task length like
+                2001 would otherwise silently collapse it to far fewer landmarks than
+                its peers' budget). The extra positions are masked, so they cannot
+                affect any output (verified leak-free). ``None`` = no padding.
             device: Device to use
         """
         super().__init__()
@@ -66,6 +75,7 @@ class LRAEncoder(nn.Module):
         self.emb_dim = emb_dim
         self.pooling_mode = pooling_mode
         self.max_seq_len = max_seq_len
+        self.pad_to_multiple_of = pad_to_multiple_of
 
         # Token embeddings (vocab_size includes padding token at 0)
         self.token_embedding = nn.Embedding(
@@ -75,6 +85,13 @@ class LRAEncoder(nn.Module):
         # Positional embeddings (learnable, as in LRA)
         # Add 1 for CLS token if using CLS pooling
         pos_len = max_seq_len + 1 if pooling_mode == "CLS" else max_seq_len
+        # If we right-pad the sequence to a multiple, positions must cover the
+        # padded length too (padded positions still get a position embedding; they
+        # are masked out of attention and pooling, so the value is irrelevant).
+        if pad_to_multiple_of is not None and pos_len % pad_to_multiple_of != 0:
+            pos_len = (
+                (pos_len + pad_to_multiple_of - 1) // pad_to_multiple_of
+            ) * pad_to_multiple_of
         self.position_embedding = nn.Embedding(pos_len, emb_dim)
 
         # CLS token (if using CLS pooling)
@@ -138,6 +155,30 @@ class LRAEncoder(nn.Module):
                 cls_mask = torch.ones(batch_size, 1, dtype=torch.bool, device=device)
                 padding_mask = torch.cat([cls_mask, padding_mask], dim=1)
             seq_len += 1
+
+        # Right-pad to a multiple (for length-sensitive mechanisms, e.g. Nyström).
+        # The appended positions are embedded as zeros and marked invalid in the
+        # mask, so every attention module and the pooling exclude them — they exist
+        # only to make ``seq_len`` divisible and cannot influence any output.
+        if self.pad_to_multiple_of is not None and seq_len % self.pad_to_multiple_of != 0:
+            target = (
+                (seq_len + self.pad_to_multiple_of - 1) // self.pad_to_multiple_of
+            ) * self.pad_to_multiple_of
+            n_pad = target - seq_len
+            x = torch.cat(
+                [x, x.new_zeros(batch_size, n_pad, self.emb_dim)], dim=1
+            )
+            if padding_mask is None:
+                # No mask means all-valid so far; the appended positions are the
+                # only invalid ones, so build an explicit mask now.
+                padding_mask = torch.ones(
+                    batch_size, seq_len, dtype=torch.bool, device=device
+                )
+            pad_mask = torch.zeros(
+                batch_size, n_pad, dtype=torch.bool, device=device
+            )
+            padding_mask = torch.cat([padding_mask, pad_mask], dim=1)
+            seq_len = target
 
         # Positional embeddings
         positions = torch.arange(seq_len, device=device)
