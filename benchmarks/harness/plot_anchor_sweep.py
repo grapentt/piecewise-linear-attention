@@ -1,23 +1,28 @@
 #!/usr/bin/env python
-"""Render the anchor-count sweep as two figures: accuracy-vs-``m`` and speed-vs-``m``.
+"""Render the anchor-count sweep as accuracy, speed, and Pareto figures.
 
 Reads the ``cuda_scaling`` result JSON produced by ``run_cuda_scaling.py`` with an
 anchor sweep (``--anchors``) and real-activation accuracy (``--acc-real
---acc-layers``), and produces:
+--acc-layers``), and writes figures under ``{prefix}/d{d}/`` in descriptive
+subfolders:
 
-- **Accuracy** (``*_accuracy.png``): x = anchor count ``m``, y = output relative
-  error to exact softmax on real trained-model activations, one curve per captured
-  layer (early/mid/late), with a horizontal reference line per baseline (its own
-  real-activation rel-err). Lower is better; ``m`` is the piecewise dial.
-- **Speed** (``*_speed.png``): x = anchor count ``m``, y = forward latency (ms), one
-  curve per sequence length ``n`` (colour-coded), with a horizontal reference line
-  per baseline per ``n`` (so each baseline contributes one line at each ``n``).
-  Points that ran out of memory are omitted from the curve and annotated as an OOM
-  ceiling marker so the fit boundary is visible rather than silently dropped.
+- **Accuracy**, one figure *per layer* (``accuracy_per_layer/accuracy_layer{L}.png``):
+  x = anchor count ``m``, y = output relative error to exact softmax on real
+  trained-model activations, with a horizontal reference line per baseline at *that
+  layer's own* rel-err (baselines vary by layer, so each layer gets its own lines
+  rather than one cross-layer average). Lower is better; ``m`` is the piecewise dial.
+- **Speed** (``speed/speed_vs_anchors.png``): x = anchor count ``m``, y = forward
+  latency (ms), one curve per sequence length ``n`` (colour-coded), with a horizontal
+  reference line per baseline per ``n``. OOM points are omitted from the curve and
+  annotated as an OOM ceiling marker so the fit boundary is visible.
+- **Pareto** (``pareto/pareto_m1_layer{L}.png``): the single-anchor ``m=1`` config
+  and every baseline plotted as points in the speed × accuracy plane (x = latency,
+  y = rel-err at that layer), so the both-axes trade-off is visible in one figure.
+  Down-and-left is better; the non-dominated frontier is highlighted.
 
-Both figures fix a single per-head ``d`` (annotated); if the sweep covered more than
-one ``d`` a separate pair of figures is written per ``d``. The non-anchor baselines
-have no ``m`` axis, so they appear only as horizontal references.
+Figures fix a single per-head ``d`` (annotated); a separate ``d{d}`` tree is written
+per ``d`` if the sweep covered more than one. Non-anchor baselines have no ``m`` axis,
+so on the anchor/speed plots they appear only as horizontal references.
 
 Examples
 --------
@@ -91,14 +96,16 @@ def _collect_speed(rows, dim, dtype):
 
 
 def _collect_accuracy(accuracy_block):
-    """Per-layer accuracy for the accuracy plot.
+    """Per-layer accuracy for the accuracy plots.
 
     Returns ``(anchor_acc, baseline_acc)`` where ``anchor_acc[layer]`` is a sorted
-    ``[(m, rel_err), ...]`` and ``baseline_acc[method]`` is the mean rel-err across
-    layers (a single reference line per baseline; the layer spread lives in the
-    anchor curves)."""
+    ``[(m, rel_err), ...]`` for the piecewise dial and ``baseline_acc[layer][method]``
+    is that layer's own rel-err. Baselines are kept *per layer* (not averaged) so
+    each layer's figure shows the baselines' true values at that layer — the spread
+    across layers is real (e.g. Nyström 0.071 @ L6 vs 0.037 @ L18) and averaging it
+    into one line would misstate the comparison."""
     anchor_acc = {}
-    baseline_vals = {}
+    baseline_acc = {}
     for pl in accuracy_block.get("per_layer", []):
         layer = pl["layer"]
         for ar in pl.get("rows", []):
@@ -108,40 +115,38 @@ def _collect_accuracy(accuracy_block):
             if m is not None:
                 anchor_acc.setdefault(layer, []).append((m, ar["rel_err"]))
             elif ar["method"] in _BASELINES and ar["method"] not in _SOFTMAX:
-                baseline_vals.setdefault(ar["method"], []).append(ar["rel_err"])
+                baseline_acc.setdefault(layer, {})[ar["method"]] = ar["rel_err"]
     for layer in anchor_acc:
         anchor_acc[layer].sort()
-    baseline_acc = {mth: sum(v) / len(v) for mth, v in baseline_vals.items() if v}
     return anchor_acc, baseline_acc
 
 
-def _plot_accuracy(anchor_acc, baseline_acc, dim, model_id, out_path):
+def _plot_accuracy_layer(layer, anchor_pts, baselines, dim, model_id, out_path):
+    """One accuracy figure for a single layer: the piecewise dial (x=m) plus a
+    horizontal line for each baseline at *its own* rel-err for this layer."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     fig, ax = plt.subplots(figsize=(8, 5.5))
-    cmap = plt.get_cmap("viridis")
-    layers = sorted(anchor_acc)
-    for i, layer in enumerate(layers):
-        ms = [m for m, _ in anchor_acc[layer]]
-        errs = [e for _, e in anchor_acc[layer]]
-        colour = cmap(0.15 + 0.7 * (i / max(1, len(layers) - 1)))
-        ax.plot(ms, errs, "-o", color=colour, label=f"piecewise, layer {layer}",
-                linewidth=2, markersize=5)
+    ms = [m for m, _ in anchor_pts]
+    errs = [e for _, e in anchor_pts]
+    ax.plot(ms, errs, "-o", color="#1f3b73", linewidth=2.2, markersize=6,
+            label="piecewise (anchor-Taylor)")
 
     base_cmap = plt.get_cmap("tab10")
-    for j, (mth, err) in enumerate(sorted(baseline_acc.items())):
-        ax.axhline(err, color=base_cmap(j % 10), linestyle="--", linewidth=1.3,
-                   alpha=0.8, label=f"{mth} (baseline)")
+    for j, mth in enumerate(sorted(baselines)):
+        ax.axhline(baselines[mth], color=base_cmap(j % 10), linestyle="--",
+                   linewidth=1.4, alpha=0.85,
+                   label=f"{mth}  ({baselines[mth]:.4f})")
 
     ax.set_xlabel("anchor count  m")
     ax.set_ylabel("relative error to exact softmax  (lower = better)")
-    ax.set_title(f"Accuracy vs anchor count — real activations "
-                 f"({model_id}), d={dim}")
+    ax.set_title(f"Accuracy vs anchor count — layer {layer}\n"
+                 f"real activations ({model_id}), d={dim}")
     ax.set_yscale("log")
     ax.grid(True, which="both", alpha=0.25)
-    ax.legend(fontsize=8, ncol=2, loc="best")
+    ax.legend(fontsize=8, loc="best")
     fig.tight_layout()
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
@@ -194,6 +199,62 @@ def _plot_speed(anchor_lat, baseline_lat, oom_m, dim, out_path):
     return out_path
 
 
+def _plot_pareto_m1(m1_lat, m1_err, baseline_lat, baseline_err, layer, n,
+                    dim, model_id, out_path):
+    """Speed × accuracy scatter for the single-anchor ``m=1`` config vs baselines.
+
+    Each method is one point: x = forward latency (ms) at length ``n``, y = rel-err
+    to softmax at ``layer``. Down-and-left is better. The non-dominated frontier
+    (no other point is <= on both axes) is drawn as a connecting line so the
+    trade-off m=1 sits on is explicit."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    pts = []  # (label, latency, rel_err, is_piecewise)
+    if m1_lat is not None and m1_err is not None:
+        pts.append(("piecewise m=1", m1_lat, m1_err, True))
+    for mth in sorted(baseline_err):
+        if mth in baseline_lat and baseline_lat[mth] is not None:
+            pts.append((mth, baseline_lat[mth], baseline_err[mth], False))
+    if not pts:
+        return None
+
+    # Non-dominated frontier: a point is on it if no other point is <= on both axes.
+    def dominated(p, others):
+        return any(o[1] <= p[1] and o[2] <= p[2] and (o[1] < p[1] or o[2] < p[2])
+                   for o in others if o is not p)
+    frontier = sorted((p for p in pts if not dominated(p, pts)),
+                      key=lambda p: p[1])
+
+    fig, ax = plt.subplots(figsize=(8, 5.5))
+    if len(frontier) > 1:
+        ax.plot([p[1] for p in frontier], [p[2] for p in frontier],
+                "-", color="0.6", linewidth=1.2, alpha=0.8, zorder=1,
+                label="non-dominated frontier")
+    for label, lat, err, is_pw in pts:
+        ax.scatter([lat], [err], s=140 if is_pw else 80,
+                   marker="*" if is_pw else "o",
+                   color="#d62728" if is_pw else "#1f77b4",
+                   edgecolor="black", linewidth=0.8, zorder=3)
+        ax.annotate(f"  {label}", xy=(lat, err), fontsize=8,
+                    va="center", ha="left",
+                    fontweight="bold" if is_pw else "normal")
+
+    ax.set_xlabel(f"forward latency at n={n}  (ms, lower = better)")
+    ax.set_ylabel(f"rel-err to softmax, layer {layer}  (lower = better)")
+    ax.set_title(f"Speed × accuracy — piecewise m=1 vs baselines\n"
+                 f"layer {layer}, d={dim}, real activations ({model_id})")
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.grid(True, which="both", alpha=0.25)
+    ax.legend(fontsize=8, loc="best")
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
+    return out_path
+
+
 def render(data, out_prefix):
     config = data.get("config", {})
     hist = data.get("history", {})
@@ -201,6 +262,7 @@ def render(data, out_prefix):
     accuracy = hist.get("accuracy", {})
     dims = config.get("dims", [128])
     speed_dtype = _speed_dtype(config)
+    out_root = Path(out_prefix)
     written = []
     for dim in dims:
         anchor_lat, baseline_lat, oom_m = _collect_speed(rows, dim, speed_dtype)
@@ -208,32 +270,59 @@ def render(data, out_prefix):
         model_id = acc_block.get("model_id", config.get("acc_model", "real"))
         anchor_acc, baseline_acc = _collect_accuracy(acc_block)
 
+        # Accuracy: one figure per layer, under a descriptive subfolder.
         if anchor_acc:
-            p = _plot_accuracy(anchor_acc, baseline_acc, dim, model_id,
-                               f"{out_prefix}_d{dim}_accuracy.png")
-            written.append(p)
+            acc_dir = out_root / f"d{dim}" / "accuracy_per_layer"
+            acc_dir.mkdir(parents=True, exist_ok=True)
+            for layer in sorted(anchor_acc):
+                p = _plot_accuracy_layer(
+                    layer, anchor_acc[layer], baseline_acc.get(layer, {}),
+                    dim, model_id, str(acc_dir / f"accuracy_layer{layer}.png"))
+                written.append(p)
         else:
-            print(f"d={dim}: no accuracy data; skipping accuracy plot")
+            print(f"d={dim}: no accuracy data; skipping accuracy plots")
+
+        # Speed: single figure (two n-curves), under its own subfolder.
         if anchor_lat:
+            speed_dir = out_root / f"d{dim}" / "speed"
+            speed_dir.mkdir(parents=True, exist_ok=True)
             p = _plot_speed(anchor_lat, baseline_lat, oom_m, dim,
-                            f"{out_prefix}_d{dim}_speed.png")
+                            str(speed_dir / "speed_vs_anchors.png"))
             written.append(p)
         else:
             print(f"d={dim}: no speed data; skipping speed plot")
+
+        # Pareto: m=1 speed × accuracy vs baselines, one figure per layer. Uses the
+        # smallest swept n (where softmax/baselines are most likely to have run).
+        if anchor_acc and anchor_lat:
+            pareto_n = min(anchor_lat)
+            m1_lat = next((ms for m, ms in anchor_lat[pareto_n] if m == 1), None)
+            base_lat_n = {mth: lat[pareto_n] for mth, lat in baseline_lat.items()
+                          if pareto_n in lat}
+            pareto_dir = out_root / f"d{dim}" / "pareto"
+            pareto_dir.mkdir(parents=True, exist_ok=True)
+            for layer in sorted(anchor_acc):
+                m1_err = next((e for m, e in anchor_acc[layer] if m == 1), None)
+                p = _plot_pareto_m1(
+                    m1_lat, m1_err, base_lat_n, baseline_acc.get(layer, {}),
+                    layer, pareto_n, dim, model_id,
+                    str(pareto_dir / f"pareto_m1_layer{layer}.png"))
+                if p:
+                    written.append(p)
     return written
 
 
 def _self_check():
     """Render the crafted schema sample so the parser/plot paths are exercised
-    without a GPU run. Writes to a temp prefix and asserts both figures appear."""
+    without a GPU run. Writes under a temp prefix and asserts figures appear."""
     sample = Path("/tmp/plot_schema_sample.json")
     if not sample.exists():
         print("self-check needs /tmp/plot_schema_sample.json (crafted sample)")
         return 1
     data = json.loads(sample.read_text())
     written = render(data, "/tmp/plot_selfcheck")
-    assert any(p.endswith("_accuracy.png") for p in written), "no accuracy figure"
-    assert any(p.endswith("_speed.png") for p in written), "no speed figure"
+    assert any("accuracy_layer" in p for p in written), "no per-layer accuracy figure"
+    assert any(p.endswith("speed_vs_anchors.png") for p in written), "no speed figure"
     for p in written:
         assert Path(p).stat().st_size > 0, f"empty figure {p}"
     print("self-check OK:", ", ".join(written))
@@ -244,7 +333,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("result_json", nargs="?", help="cuda_scaling result JSON")
     parser.add_argument("--out-prefix", default="results/anchor_sweep",
-                        help="output path prefix; figures get _d{d}_{accuracy,speed}.png")
+                        help="output root; figures written under "
+                             "{prefix}/d{d}/accuracy_per_layer/ and {prefix}/d{d}/speed/")
     parser.add_argument("--self-check", action="store_true",
                         help="render the crafted schema sample (no GPU) and assert")
     args = parser.parse_args(argv)
