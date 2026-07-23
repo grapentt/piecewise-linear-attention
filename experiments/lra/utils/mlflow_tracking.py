@@ -25,11 +25,12 @@ from typing import Any, Dict, Optional
 
 
 def _flatten(prefix: str, obj: Any, out: Dict[str, Any]) -> None:
-    """Flatten a nested dict/scalar into ``dotted.key -> value`` params.
+    """Flatten nested dicts into ``dotted.key -> value`` params.
 
-    MLflow params are flat string→scalar; ``attn_kwargs``/``config`` are shallow
-    dicts, so a one-level dotted flatten is enough and keeps keys readable
-    (``attn.num_landmarks``, ``config.learning_rate``).
+    Recurses through nested dicts (``config``/``attn_kwargs`` are shallow in
+    practice, but arbitrary depth is handled) and keeps keys readable
+    (``attn.num_landmarks``, ``config.learning_rate``). Non-dict values — scalars,
+    ``None``, lists, tuples — are stored as-is and stringified by the caller.
     """
     if isinstance(obj, dict):
         for k, v in obj.items():
@@ -108,16 +109,40 @@ class MLflowTracker:
 
         Pair with :meth:`end_method`. A no-op when tracking is disabled, so the
         trainer can call it unconditionally without an ``if``/``with`` wrapper.
+
+        Exception-safety: if a *previous* method's run was left open (its
+        :meth:`end_method` skipped because that iteration raised), this first ends
+        it so the new run nests under the parent rather than under the leaked
+        sibling. Without this, one failed method would silently re-parent every
+        method after it, corrupting the comparison grouping.
         """
         if not self.enabled:
             return
+        active = self._mlflow.active_run()
+        if active is not None and (
+            self._parent_run is None
+            or active.info.run_id != self._parent_run.info.run_id
+        ):
+            # A leaked nested (method) run is on top of the stack — close it so we
+            # start clean under the parent.
+            self._mlflow.end_run()
         self._mlflow.start_run(run_name=method, nested=True)
         self._mlflow.set_tag("attention_method", method)
 
     def end_method(self) -> None:
-        """End the nested per-method run started by :meth:`start_method`."""
+        """End the nested per-method run started by :meth:`start_method`.
+
+        Only ends a run if the active run is actually a nested (non-parent) run,
+        so a double call or a call after the run already closed cannot accidentally
+        end the parent.
+        """
         if not self.enabled:
             return
+        active = self._mlflow.active_run()
+        if active is None:
+            return
+        if self._parent_run is not None and active.info.run_id == self._parent_run.info.run_id:
+            return  # never end the parent here — that's close()'s job
         self._mlflow.end_run()
 
     def log_method_params(self, params: Dict[str, Any]) -> None:
@@ -153,7 +178,14 @@ class MLflowTracker:
         self._mlflow.log_artifact(path)
 
     def close(self) -> None:
+        """End all open runs, draining any leaked nested run before the parent.
+
+        A bare ``end_run()`` only pops the top of MLflow's run stack, so if a
+        method run was left open (its iteration raised) it would end *that* and
+        leave the parent stuck in RUNNING. Draining the whole stack guarantees the
+        parent reaches a terminal state.
+        """
         if not self.enabled:
             return
-        if self._parent_run is not None:
+        while self._mlflow.active_run() is not None:
             self._mlflow.end_run()
