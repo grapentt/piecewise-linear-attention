@@ -660,7 +660,13 @@ def main(argv=None):
                         help="model id for --acc-real (head_dim must match a swept "
                              "dim; gpt-neo-1.3B is head_dim 128).")
     parser.add_argument("--acc-layer", type=int, default=6,
-                        help="decoder layer to capture for --acc-real.")
+                        help="single decoder layer to capture for --acc-real "
+                             "(shorthand; --acc-layers overrides).")
+    parser.add_argument("--acc-layers", type=int, nargs="+", default=None,
+                        help="decoder layers to capture for --acc-real; accuracy is "
+                             "reported per layer so the anchor dial's robustness "
+                             "across depth is visible (early/mid/late). Overrides "
+                             "--acc-layer when set.")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--out", type=str, default=None)
     parser.add_argument("--smoke", action="store_true")
@@ -729,30 +735,40 @@ def main(argv=None):
     accuracy = {}
     if args.accuracy:
         acc_dtype = "bf16" if "bf16" in args.dtypes else args.dtypes[0]
+        acc_layers = args.acc_layers if args.acc_layers is not None else [args.acc_layer]
         for dim in args.dims:
             if args.acc_real:
-                loaded = _load_real_accuracy_qkv(args.acc_model, args.acc_layer,
-                                                 dim, _DTYPES[acc_dtype], device)
-                if loaded is None:
-                    print(f"\naccuracy(d={dim}): real activations unavailable "
-                          f"(model/head-dim mismatch or no hub); accuracy skipped")
-                    accuracy[str(dim)] = {"reference_n": None, "input": "real",
-                                          "dtype": acc_dtype, "rows": [],
-                                          "meta": None}
-                    continue
-                Qa, Ka, Va, meta = loaded
-                ref_n = Qa.shape[1]
-                print(f"\naccuracy(d={dim}, dtype={acc_dtype}, input=real "
-                      f"{meta['model_id']} L{meta['layer']}, n={ref_n}, "
-                      f"bh={meta['batch_heads']}):")
-                acc_rows = _accuracy_pass(args.methods, dim, acc_dtype,
-                                          Qa, Ka, Va, device)
-                del Qa, Ka, Va
-                if device.type == "cuda":
-                    torch.cuda.empty_cache()
-                accuracy[str(dim)] = {"reference_n": ref_n, "input": "real",
-                                      "dtype": acc_dtype, "rows": acc_rows,
-                                      "meta": meta}
+                # Per-layer accuracy across depth (early/mid/late) so the anchor
+                # dial's robustness is a distribution, not a single block.
+                per_layer = []
+                for layer in acc_layers:
+                    loaded = _load_real_accuracy_qkv(args.acc_model, layer, dim,
+                                                     _DTYPES[acc_dtype], device)
+                    if loaded is None:
+                        print(f"\naccuracy(d={dim}, L{layer}): real activations "
+                              f"unavailable (head-dim mismatch or no hub); skipped")
+                        per_layer.append({"layer": layer, "reference_n": None,
+                                          "meta": None, "rows": []})
+                        continue
+                    Qa, Ka, Va, meta = loaded
+                    ref_n = Qa.shape[1]
+                    print(f"\naccuracy(d={dim}, dtype={acc_dtype}, input=real "
+                          f"{meta['model_id']} L{meta['layer']}, n={ref_n}, "
+                          f"bh={meta['batch_heads']}):")
+                    acc_rows = _accuracy_pass(args.methods, dim, acc_dtype,
+                                              Qa, Ka, Va, device)
+                    del Qa, Ka, Va
+                    if device.type == "cuda":
+                        torch.cuda.empty_cache()
+                    for ar in acc_rows:
+                        re = ar["rel_err"]
+                        re_s = f"{re:.4f}" if re is not None else ar["status"]
+                        print(f"    {ar['method']:22s} rel_err={re_s}")
+                    per_layer.append({"layer": layer, "reference_n": ref_n,
+                                      "meta": meta, "rows": acc_rows})
+                accuracy[str(dim)] = {"input": "real", "dtype": acc_dtype,
+                                      "model_id": args.acc_model,
+                                      "layers": acc_layers, "per_layer": per_layer}
             else:
                 ref_n = _largest_reference_n(args.lengths, args.acc_batch,
                                              _DTYPES[acc_dtype], device)
@@ -775,10 +791,10 @@ def main(argv=None):
                 accuracy[str(dim)] = {"reference_n": ref_n, "input": "random",
                                       "acc_batch": args.acc_batch,
                                       "dtype": acc_dtype, "rows": acc_rows}
-            for ar in accuracy[str(dim)]["rows"]:
-                re = ar["rel_err"]
-                re_s = f"{re:.4f}" if re is not None else ar["status"]
-                print(f"    {ar['method']:22s} rel_err={re_s}")
+                for ar in acc_rows:
+                    re = ar["rel_err"]
+                    re_s = f"{re:.4f}" if re is not None else ar["status"]
+                    print(f"    {ar['method']:22s} rel_err={re_s}")
 
     metrics = {"verdict_pass": bool(verdict_pass)}
     for k, v in conds.items():
@@ -823,8 +839,13 @@ def main(argv=None):
         assert any(_kmeans_anchor_count(r["method"]) is not None for r in rows), \
             "expected a dynamic piecewise_kmeans_m{k} anchor method in the rows"
         # Accuracy path produced comparable rel-err for the anchor config and a
-        # baseline against the softmax reference.
-        acc_all = [ar for blk in accuracy.values() for ar in blk["rows"]]
+        # baseline against the softmax reference. Handle both envelope shapes:
+        # random accuracy stores a flat ``rows``; real accuracy stores ``per_layer``.
+        acc_all = []
+        for blk in accuracy.values():
+            acc_all.extend(blk.get("rows", []))
+            for pl in blk.get("per_layer", []):
+                acc_all.extend(pl.get("rows", []))
         assert acc_all, "accuracy pass produced no rows"
         assert any(ar["method"].startswith("piecewise") and ar["rel_err"] is not None
                    for ar in acc_all), "no piecewise accuracy measured"
