@@ -30,6 +30,7 @@ from experiments.lra.configs.base_config import (
 from experiments.lra.models.encoder import LRAEncoder
 from experiments.lra.data.listops import get_listops_dataloaders, ListOpsDataset
 from experiments.lra.utils.training import train_epoch, evaluate, set_seed, get_device
+from experiments.lra.utils.mlflow_tracking import MLflowTracker
 
 
 def print_banner(text: str, char: str = "="):
@@ -136,6 +137,34 @@ def main():
         "(fp32 master weights, no GradScaler needed); halves memory and speeds up "
         "on tensor-core GPUs. 'fp32' (default) is full precision.",
     )
+    parser.add_argument(
+        "--mlflow",
+        action="store_true",
+        help="Enable MLflow experiment tracking. Off by default; a no-op if the "
+        "'mlflow' package is not installed. Logs one nested run per attention "
+        "method (params, per-epoch metrics, final test metrics) under a parent run.",
+    )
+    parser.add_argument(
+        "--mlflow-experiment",
+        type=str,
+        default="lra-listops",
+        help="MLflow experiment name (only used with --mlflow).",
+    )
+    parser.add_argument(
+        "--mlflow-tracking-uri",
+        type=str,
+        default="sqlite:///mlflow.db",
+        help="MLflow tracking URI (only used with --mlflow). Defaults to a local "
+        "SQLite store (./mlflow.db) — self-contained, no server needed, and the "
+        "backend MLflow recommends now that the bare-directory file store is "
+        "deprecated. Point at a tracking server (http://...) to log remotely.",
+    )
+    parser.add_argument(
+        "--mlflow-run-name",
+        type=str,
+        default=None,
+        help="Name for the parent MLflow run (only used with --mlflow).",
+    )
     args = parser.parse_args()
 
     # Print configuration
@@ -180,6 +209,24 @@ def main():
     amp_dtype = torch.bfloat16 if args.precision == "bf16" else None
     print(f"  Precision: {args.precision}")
 
+    # Optional MLflow tracking (no-op unless --mlflow and the package is present).
+    tracker = MLflowTracker(
+        enabled=args.mlflow,
+        experiment=args.mlflow_experiment,
+        tracking_uri=args.mlflow_tracking_uri,
+        run_name=args.mlflow_run_name,
+    )
+    tracker.log_parent_params({
+        "attention_types": ",".join(args.attention_types),
+        "epochs": args.epochs,
+        "batch_size": args.batch_size,
+        "seed": args.seed,
+        "precision": args.precision,
+        "device": str(device),
+        "max_length": config.max_length,
+        "config": config.to_dict(),
+    })
+
     # Adjust data directory for quick test to avoid conflicts
     data_dir = args.data_dir
     if os.environ.get('LISTOPS_QUICK_TEST', '').lower() in ('1', 'true', 'yes'):
@@ -207,6 +254,9 @@ def main():
 
     for attention_type in args.attention_types:
         print_banner(f"{attention_type.upper()} Attention", char="-")
+
+        # Open a nested MLflow run for this method (no-op unless --mlflow).
+        tracker.start_method(attention_type)
 
         # Set seed for reproducibility
         set_seed(config.random_seed)
@@ -240,6 +290,16 @@ def main():
 
         num_params = sum(p.numel() for p in model.parameters())
         print(f"Model parameters: {num_params:,}")
+
+        # Log this method's reproducibility params to its nested MLflow run.
+        tracker.log_method_params({
+            "attention_type": attention_type,
+            "attn": attn_kwargs,
+            "precision": args.precision,
+            "padded_seq_len": model.position_embedding.num_embeddings,
+            "num_parameters": num_params,
+            "config": config.to_dict(),
+        })
 
         # Optimizer and criterion
         optimizer = torch.optim.AdamW(
@@ -293,6 +353,9 @@ def main():
                 best_val_acc = val_metrics['accuracy']
                 print(f"  ✓ New best validation accuracy: {best_val_acc*100:.2f}%")
 
+            # Log stepped per-epoch metrics (no-op unless --mlflow).
+            tracker.log_epoch(epoch, train_metrics, val_metrics)
+
         total_time = time.time() - start_time
 
         # Final test evaluation
@@ -327,11 +390,18 @@ def main():
         print(f"  Total training time: {format_time(total_time)}")
         print(f"  Average epoch time: {format_time(total_time / config.num_epochs)}")
 
+        # Log final metrics and close this method's nested MLflow run.
+        tracker.log_final(test_metrics, best_val_acc, total_time)
+        tracker.end_method()
+
     # Save all results
     output_file = os.path.join(args.output_dir, "results.json")
     with open(output_file, 'w') as f:
         json.dump(all_results, f, indent=2, default=str)
     print(f"\n✓ Results saved to {output_file}")
+
+    # Attach the aggregate results to the parent MLflow run, then close it.
+    tracker.log_artifact(output_file)
 
     # Print comparison table
     print_banner("COMPARISON SUMMARY")
@@ -374,6 +444,9 @@ def main():
         diff = test_acc - lra_baseline
         sign = "+" if diff >= 0 else ""
         print(f"  {attention_type.capitalize()}: {test_acc:.2f}% ({sign}{diff:.2f}%)")
+
+    # Close the parent MLflow run (no-op unless --mlflow).
+    tracker.close()
 
 
 if __name__ == "__main__":
