@@ -36,6 +36,15 @@ truth on one shared input, at a small ``--acc-batch`` where the ``O(n²)`` refer
 still fits at long ``n`` (probed empirically); where softmax cannot fit even at the
 smallest batch, accuracy is recorded as unavailable and only speed/memory is kept.
 
+Every method is scored **untrained** (constructed fresh, one forward under
+``no_grad``). That is a fair accuracy test only for the training-free approximations
+— Performer (a data-independent unbiased softmax-kernel estimator), Nyströmformer
+(landmarks derived from the input), and piecewise (anchors fit on the input). It
+under-represents Linformer and Luna, whose defining projections are *learned*
+parameters (trained end-to-end in their papers) and are left at random
+initialisation here; their rel-err reflects a random compression, not the method, so
+the accuracy comparison should be read as piecewise vs the training-free baselines.
+
 Examples
 --------
 Smoke (CPU, seconds, self-checking)::
@@ -571,6 +580,10 @@ def _accuracy_pass(methods, dim, dtype_name, Q, K, V, device):
     input ``(batch, n, dim)``. Non-causal only (the ground truth is dense softmax).
     Every method — anchor configs and the fixed baselines alike — sees the SAME
     Q/K/V, so the rel-err numbers are directly comparable across the whole frontier.
+    All methods are scored untrained; this is fair to the training-free
+    approximations (Performer, Nyströmformer, piecewise) but not to Linformer/Luna,
+    whose learned projections are left at random init here (their rel-err reflects a
+    random compression, not the trained method — read the comparison accordingly).
     Returns a list of ``{method, rel_err, status}`` rows. Softmax is the reference,
     so its own rel_err is 0 by construction; if softmax OOMs on this input the whole
     pass returns a single ``oom`` reference row."""

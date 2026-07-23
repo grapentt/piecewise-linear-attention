@@ -46,6 +46,19 @@ from pathlib import Path
 _BASELINES = ["performer", "nystromformer", "linformer", "luna", "linear",
               "standard", "sdpa_math"]
 _SOFTMAX = {"standard", "sdpa_math"}
+# Baselines whose defining projection is a *learned* parameter (trained end-to-end in
+# their papers) but is left at random init in this untrained accuracy pass, so their
+# rel-err reflects a random compression rather than the method. Flagged in the legend
+# and excluded from the headline accuracy claim; the training-free baselines
+# (performer, nystromformer) are the fair accuracy peers.
+_UNTRAINED = {"linformer", "luna"}
+
+
+def _baseline_label(method, value):
+    """Legend label for a baseline: value plus an ``(untrained)`` flag for the
+    learned-projection baselines scored at random init."""
+    suffix = "  [untrained]" if method in _UNTRAINED else ""
+    return f"{method}  ({value:.4f}){suffix}"
 
 
 def _anchor_count(method):
@@ -138,7 +151,7 @@ def _plot_accuracy_layer(layer, anchor_pts, baselines, dim, model_id, out_path):
     for j, mth in enumerate(sorted(baselines)):
         ax.axhline(baselines[mth], color=base_cmap(j % 10), linestyle="--",
                    linewidth=1.4, alpha=0.85,
-                   label=f"{mth}  ({baselines[mth]:.4f})")
+                   label=_baseline_label(mth, baselines[mth]))
 
     ax.set_xlabel("anchor count  m")
     ax.set_ylabel("relative error to exact softmax  (lower = better)")
@@ -237,7 +250,8 @@ def _plot_pareto_m1(m1_lat, m1_err, baseline_lat, baseline_err, layer, n,
                    marker="*" if is_pw else "o",
                    color="#d62728" if is_pw else "#1f77b4",
                    edgecolor="black", linewidth=0.8, zorder=3)
-        ax.annotate(f"  {label}", xy=(lat, err), fontsize=8,
+        tag = "  [untrained]" if label in _UNTRAINED else ""
+        ax.annotate(f"  {label}{tag}", xy=(lat, err), fontsize=8,
                     va="center", ha="left",
                     fontweight="bold" if is_pw else "normal")
 

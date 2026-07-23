@@ -9,14 +9,22 @@ points.
 ## One-line state
 
 Piecewise attention is uniformly faster than standard softmax at long context and,
-on **real trained-model activations**, is more accurate than every efficient-attention
-baseline at *every* anchor count. On the accuracy axis the story is decisive: at the
-worst layer (GPT-Neo-1.3B L6, `d=128`, native `n=512`), even the single-anchor `m=1`
-build (rel-err `0.046`) beats the best baseline (Nyström `0.071`), and the whole
-`m=1…12` curve sits below all baselines (Performer/luna/linear `≈0.4`, Linformer
-`>1`); more anchors lower error monotonically (`m=1→12`: `0.046→0.021`). The earlier
-"`m=1` not accurate enough" verdict was an artifact of the worst-case random-Gaussian
-regime; real activations invert it.
+on **real trained-model activations**, is more accurate than every **training-free**
+efficient-attention baseline at *every* anchor count. On the accuracy axis the story
+is decisive against the methods it can be fairly compared to: at the worst layer
+(GPT-Neo-1.3B L6, `d=128`, native `n=512`), even the single-anchor `m=1` build
+(rel-err `0.046`) beats the best training-free baseline (Nyström `0.071`, itself
+data-adaptive) and Performer (`0.43`), and the whole `m=1…12` curve sits below them;
+more anchors lower error monotonically (`m=1→12`: `0.046→0.021`). At the deeper layers
+the margin widens (L12 `m=1=0.006` vs Nyström `0.046`; L18 `m=1=0.004` vs Nyström
+`0.037`). The earlier "`m=1` not accurate enough" verdict was an artifact of the
+worst-case random-Gaussian regime; real activations invert it.
+
+The two *learned*-projection baselines — **Linformer** (`>1`) and **luna** (`≈0.4`) —
+are shown for reference only and are **not** part of this accuracy claim: their
+defining projections are trained end-to-end in their papers but are left at random
+initialisation here (see "Fairness of the accuracy comparison" below), so their
+rel-err reflects random compressions rather than the methods as intended.
 
 On the **speed** axis (bf16 forward, `d=128`) there is a sharp cliff: `m=1` is fast
 (`6.3 ms` at `n=8192`, ~4× faster than Performer, on par with linear/Nyström), but
@@ -25,14 +33,34 @@ the only config on the speed frontier**; `m≥2` buys lower error at a large lat
 
 **Both-axes verdict (the project's central question):** joining speed × worst-layer
 accuracy at `d=128, n=8192, bf16`, **every `m∈{1…12}` is Pareto-non-dominated** — no
-baseline beats any of them on *both* axes, because piecewise wins accuracy against all
-of them by a wide margin. But **no `m` beats all baselines *strictly on both* axes at
-once**: luna (`3.8 ms`) and Nyström (`5.7 ms`) are faster than even `m=1` (`6.3 ms`),
-so `m=1` wins accuracy-decisively while being 1.1–1.6× slower than the two fastest
-linear baselines. The honest headline: **`m=1` is the accuracy-dominant point of the
-efficient-attention frontier at near-top speed**, and anchor count is a monotone
-accuracy dial above it. (Measured bf16 fwd-only on A100; `results/cuda_scaling_anchors_a100.json`,
-figures `results/anchor_sweep_d128_{accuracy,speed}.png`.)
+baseline beats any of them on *both* axes, because piecewise wins accuracy against the
+training-free baselines by a wide margin. But **no `m` beats all baselines *strictly on
+both* axes at once**: luna (`3.8 ms`) and Nyström (`5.7 ms`) are faster than even `m=1`
+(`6.3 ms`), so `m=1` wins accuracy-decisively (over Performer/Nyström) while being
+1.1–1.6× slower than the two fastest linear baselines. The honest headline: **`m=1` is
+the accuracy-dominant point of the efficient-attention frontier at near-top speed**,
+and anchor count is a monotone accuracy dial above it. (Measured bf16 fwd-only on A100;
+`results/cuda_scaling_anchors_a100.json`, figures under
+`results/anchor_sweep/d128/{accuracy_per_layer,speed,pareto}/`.)
+
+### Fairness of the accuracy comparison
+
+Every method is scored **untrained** on the same real GPT-Neo-1.3B `Q/K/V`, against an
+exact-softmax ground truth. That is a fair test for the **training-free**
+approximations — Performer (an unbiased random-feature estimator of the softmax
+kernel), Nyström (landmarks = segment means of the actual `Q/K`, so data-adaptive at
+inference), and piecewise itself (k-means anchors fit on the input) — all of which are
+designed to work with no training. It is **not** fair to **Linformer** and **luna**,
+whose defining components are learned projections (`E`/`F`; pack queries) that their
+papers train end-to-end; left at random init they compute a random compression, so
+their large rel-err is not representative and they are excluded from the accuracy claim
+above (kept only as a reference line, flagged "untrained" in the figures). Two
+secondary caveats: piecewise's anchor count `m` is swept while each baseline's rank
+(features/landmarks/`k`/pack) is frozen at a single un-tuned setting, and the metric is
+relative error *to softmax*, which structurally suits a first-order-Taylor-of-softmax
+method. The clean follow-up that would make Linformer/luna a strictly fair comparison
+is to fit their projections to the captured activations (unsupervised distillation to
+the exact-softmax output) before scoring — an open item, not yet run.
 
 ## Speed
 
