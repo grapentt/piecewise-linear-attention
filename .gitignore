@@ -143,6 +143,14 @@ checkpoints/
 outputs/
 wandb/
 
+# MLflow experiment tracking (optional --mlflow store/artifacts)
+mlruns/
+mlflow.db
+mlflow.db-journal
+mlflow.db-wal
+mlflow.db-shm
+mlartifacts/
+
 # Benchmark results
 benchmark_results/
 *.png

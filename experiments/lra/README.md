@@ -54,6 +54,34 @@ python experiments/lra/tasks/listops/train.py \
 `--attention-types` defaults to all methods (`standard linear performer
 nystromformer linformer luna piecewise`); pass a subset to compare fewer.
 
+### Experiment tracking (optional)
+
+The trainer can log to [MLflow](https://mlflow.org) with `--mlflow` (off by
+default). It is an **optional** dependency: without it the trainer behaves
+identically, and if `--mlflow` is passed but the package is not installed the run
+prints a warning and continues untracked. Install it via the extra:
+
+```bash
+pip install -e ".[tracking]"   # adds mlflow
+```
+
+Each run records one nested MLflow run per attention method (grouped under a
+parent run) with the method's matched hyperparameters, precision, padded sequence
+length, per-epoch train/val loss+accuracy, and final test metrics; the aggregate
+`results.json` is attached as an artifact. The tracking store defaults to a local
+SQLite file (`./mlflow.db`) — self-contained and server-free — because MLflow has
+deprecated the bare-directory file store; point `--mlflow-tracking-uri` at an
+`http://` tracking server to log remotely.
+
+```bash
+python experiments/lra/tasks/listops/train.py \
+    --epochs 10 --batch-size 32 --device cuda --precision bf16 \
+    --mlflow --mlflow-experiment lra-listops --mlflow-run-name anchors-m1-m4
+
+# Browse locally:
+mlflow ui --backend-store-uri sqlite:///mlflow.db
+```
+
 ### Dataset
 
 **ListOps** is a diagnostic task that requires parsing hierarchical nested expressions like `[MAX 2 9 [MIN 4 7] 0]`.
