@@ -22,6 +22,19 @@ def _autocast_ctx(device: torch.device, amp_dtype: Optional[torch.dtype]):
     return torch.autocast(device_type=device_type, dtype=amp_dtype)
 
 
+def _sync(device: torch.device) -> None:
+    """Block until queued device work is done, so wall-clock stamps are truthful.
+
+    CUDA kernels launch asynchronously: without a synchronize, a ``time.time()``
+    taken right after ``optimizer.step()`` records only *launch* time, and the real
+    compute is billed to whenever the next ``.item()`` forces a sync — smearing
+    compute into the following iteration's data-load window. Syncing at each stamp
+    attributes data-load vs compute time correctly. No-op on CPU/MPS.
+    """
+    if device.type == "cuda":
+        torch.cuda.synchronize(device)
+
+
 def train_epoch(
     model: nn.Module,
     train_loader,
@@ -54,16 +67,25 @@ def train_epoch(
     total_loss = 0.0
     total_correct = 0
     total_samples = 0
+    data_time = 0.0      # wall time waiting on the dataloader (collation + h2d)
+    compute_time = 0.0   # wall time in forward + backward + optimizer step
     start_time = time.time()
+    end = time.time()  # timestamp of the previous iteration's close
 
     pbar = tqdm(train_loader, desc=f"Epoch {epoch}", leave=False)
     for batch in pbar:
-        # Move to device
+        # Data-load window: from the previous iteration's close until the batch is
+        # on-device and ready to compute on. Includes DataLoader collation and the
+        # host->device copies (synced so the copies are actually finished).
         input_ids = batch['input_ids'].to(device)
         padding_mask = batch['padding_mask'].to(device)
         labels = batch['labels'].to(device)
+        _sync(device)
+        data_time += time.time() - end
 
-        # Forward pass
+        # Compute window: forward + backward + step, synced at the close so async
+        # CUDA kernels are billed here rather than smeared into the next data window.
+        compute_start = time.time()
         optimizer.zero_grad()
         with _autocast_ctx(device, amp_dtype):
             logits = model(input_ids, padding_mask)
@@ -73,6 +95,8 @@ def train_epoch(
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
         optimizer.step()
+        _sync(device)
+        compute_time += time.time() - compute_start
 
         # Compute metrics
         predictions = logits.argmax(dim=-1)
@@ -88,6 +112,7 @@ def train_epoch(
             'loss': f'{loss.item():.4f}',
             'acc': f'{current_acc:.4f}',
         })
+        end = time.time()
 
     epoch_time = time.time() - start_time
     avg_loss = total_loss / total_samples
@@ -97,7 +122,10 @@ def train_epoch(
         'loss': avg_loss,
         'accuracy': accuracy,
         'time': epoch_time,
+        'data_time': data_time,
+        'compute_time': compute_time,
         'samples_per_sec': total_samples / epoch_time,
+        'compute_samples_per_sec': total_samples / compute_time if compute_time else 0.0,
     }
 
 
@@ -126,6 +154,8 @@ def evaluate(
     total_loss = 0.0
     total_correct = 0
     total_samples = 0
+    compute_time = 0.0
+    start_time = time.time()
 
     with torch.no_grad():
         for batch in tqdm(eval_loader, desc="Evaluating", leave=False):
@@ -134,10 +164,14 @@ def evaluate(
             padding_mask = batch['padding_mask'].to(device)
             labels = batch['labels'].to(device)
 
-            # Forward pass
+            # Forward pass (synced so compute time reflects the real kernel cost)
+            _sync(device)
+            compute_start = time.time()
             with _autocast_ctx(device, amp_dtype):
                 logits = model(input_ids, padding_mask)
                 loss = criterion(logits, labels)
+            _sync(device)
+            compute_time += time.time() - compute_start
 
             # Compute metrics
             predictions = logits.argmax(dim=-1)
@@ -153,6 +187,8 @@ def evaluate(
     return {
         'loss': avg_loss,
         'accuracy': accuracy,
+        'time': time.time() - start_time,
+        'compute_time': compute_time,
     }
 
 

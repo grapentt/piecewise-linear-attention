@@ -163,12 +163,25 @@ class MLflowTracker:
                     metrics[f"{split}_{k}"] = float(v)
         self._mlflow.log_metrics(metrics, step=epoch)
 
-    def log_final(self, test: Dict[str, float], best_val_acc: float, total_time: float) -> None:
+    def log_final(
+        self,
+        test: Dict[str, float],
+        best_val_acc: float,
+        total_time: float,
+        total_compute_time: Optional[float] = None,
+        total_data_time: Optional[float] = None,
+    ) -> None:
         if not self.enabled:
             return
         metrics = {f"test_{k}": float(v) for k, v in test.items() if isinstance(v, numbers.Number)}
         metrics["best_val_accuracy"] = float(best_val_acc)
         metrics["total_train_time_sec"] = float(total_time)
+        # Split timings (present once the trainer measures them): compute_time is the
+        # data-pipeline-free attention+FFN cost — the honest speed axis.
+        if total_compute_time is not None:
+            metrics["total_compute_time_sec"] = float(total_compute_time)
+        if total_data_time is not None:
+            metrics["total_data_time_sec"] = float(total_data_time)
         self._mlflow.log_metrics(metrics)
 
     def log_artifact(self, path: str) -> None:

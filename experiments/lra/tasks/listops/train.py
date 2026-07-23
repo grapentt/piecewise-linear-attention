@@ -344,7 +344,9 @@ def main():
             print(f"\nEpoch {epoch}/{config.num_epochs}")
             print(f"  Train: loss={train_metrics['loss']:.4f}, "
                   f"acc={train_metrics['accuracy']*100:.2f}%, "
-                  f"time={format_time(train_metrics['time'])}")
+                  f"time={format_time(train_metrics['time'])} "
+                  f"(compute={format_time(train_metrics['compute_time'])}, "
+                  f"data={format_time(train_metrics['data_time'])})")
             print(f"  Val:   loss={val_metrics['loss']:.4f}, "
                   f"acc={val_metrics['accuracy']*100:.2f}%")
 
@@ -357,6 +359,12 @@ def main():
             tracker.log_epoch(epoch, train_metrics, val_metrics)
 
         total_time = time.time() - start_time
+
+        # Aggregate the per-epoch split so the comparison can separate attention
+        # compute cost from data-pipeline cost (the whole reason for the split): the
+        # end-to-end total is data-pipeline-confounded, compute_time is not.
+        total_compute_time = sum(h['compute_time'] for h in train_history)
+        total_data_time = sum(h['data_time'] for h in train_history)
 
         # Final test evaluation
         test_metrics = evaluate(
@@ -380,6 +388,8 @@ def main():
             'test_metrics': test_metrics,
             'best_val_accuracy': best_val_acc,
             'total_time': total_time,
+            'total_compute_time': total_compute_time,
+            'total_data_time': total_data_time,
         }
         all_results[attention_type] = results
 
@@ -388,10 +398,18 @@ def main():
         print(f"  Best validation accuracy: {best_val_acc*100:.2f}%")
         print(f"  Test accuracy: {test_metrics['accuracy']*100:.2f}%")
         print(f"  Total training time: {format_time(total_time)}")
+        print(f"  Compute time (attn+FFN, synced): {format_time(total_compute_time)}")
+        print(f"  Data-pipeline time: {format_time(total_data_time)}")
         print(f"  Average epoch time: {format_time(total_time / config.num_epochs)}")
 
         # Log final metrics and close this method's nested MLflow run.
-        tracker.log_final(test_metrics, best_val_acc, total_time)
+        tracker.log_final(
+            test_metrics,
+            best_val_acc,
+            total_time,
+            total_compute_time=total_compute_time,
+            total_data_time=total_data_time,
+        )
         tracker.end_method()
 
     # Save all results
@@ -406,12 +424,19 @@ def main():
     # Print comparison table
     print_banner("COMPARISON SUMMARY")
 
-    # Header
-    print(f"{'Method':<20} {'Val Acc':<12} {'Test Acc':<12} {'Time':<12} {'Speedup':<10}")
-    print("-" * 70)
+    # Header. Two speedups are reported because they answer different questions:
+    #   Speedup      = end-to-end wall clock (data pipeline INCLUDED) — what the box
+    #                  actually took; a lower bound on the attention win because the
+    #                  shared data pipeline is charged to every method equally.
+    #   Cmp-Speedup  = compute-only (synced attention+FFN, data pipeline EXCLUDED) —
+    #                  the honest O(n^2)-vs-O(n*k) attention-cost comparison.
+    print(f"{'Method':<16} {'Val Acc':<9} {'Test Acc':<9} {'Time':<9} "
+          f"{'Speedup':<9} {'Compute':<9} {'Cmp-Speedup':<12}")
+    print("-" * 74)
 
-    # Get baseline time (standard attention)
+    # Baselines: standard attention for both the end-to-end and compute-only axes.
     baseline_time = all_results.get('standard', {}).get('total_time', None)
+    baseline_compute = all_results.get('standard', {}).get('total_compute_time', None)
 
     # Print each method
     for attention_type in args.attention_types:
@@ -419,21 +444,29 @@ def main():
         val_acc = results['best_val_accuracy'] * 100
         test_acc = results['test_metrics']['accuracy'] * 100
         total_time = results['total_time']
+        compute_time = results.get('total_compute_time', 0.0)
 
-        # Calculate speedup
+        # End-to-end speedup (data-pipeline-confounded)
         if baseline_time and attention_type != 'standard':
-            speedup = baseline_time / total_time
-            speedup_str = f"{speedup:.2f}×"
+            speedup_str = f"{baseline_time / total_time:.2f}×"
         else:
             speedup_str = "baseline" if attention_type == 'standard' else "-"
 
-        print(f"{attention_type.capitalize():<20} "
-              f"{val_acc:<12.2f} "
-              f"{test_acc:<12.2f} "
-              f"{format_time(total_time):<12} "
-              f"{speedup_str:<10}")
+        # Compute-only speedup (the real attention-cost comparison)
+        if baseline_compute and compute_time and attention_type != 'standard':
+            cmp_speedup_str = f"{baseline_compute / compute_time:.2f}×"
+        else:
+            cmp_speedup_str = "baseline" if attention_type == 'standard' else "-"
 
-    print("=" * 70)
+        print(f"{attention_type.capitalize():<16} "
+              f"{val_acc:<9.2f} "
+              f"{test_acc:<9.2f} "
+              f"{format_time(total_time):<9} "
+              f"{speedup_str:<9} "
+              f"{format_time(compute_time):<9} "
+              f"{cmp_speedup_str:<12}")
+
+    print("=" * 74)
 
     # LRA Baseline comparison
     lra_baseline = 36.37  # From LRA paper
