@@ -8,14 +8,59 @@ points.
 
 ## One-line state
 
-Piecewise attention is uniformly faster than standard softmax at long context.
-At a single anchor (`m=1`) it also beats the linear-attention baselines on
-speed but is not accurate enough on real trained-model activations. At high
-anchor count (`m=64`) it beats every efficient baseline on real-activation
-accuracy but is still slower than Performer on CPU. **The accuracy win and the
-speed loss are the same configuration.** Whether a middle `m` lands in a
-genuinely non-dominated (faster *and* competitively accurate) region is open and
-gated on a GPU measurement at realistic per-head dimension.
+Piecewise attention is uniformly faster than standard softmax at long context and,
+on **real trained-model activations**, is more accurate than every **training-free**
+efficient-attention baseline at *every* anchor count. On the accuracy axis the story
+is decisive against the methods it can be fairly compared to: at the worst layer
+(GPT-Neo-1.3B L6, `d=128`, native `n=512`), even the single-anchor `m=1` build
+(rel-err `0.046`) beats the best training-free baseline (Nyström `0.071`, itself
+data-adaptive) and Performer (`0.43`), and the whole `m=1…12` curve sits below them;
+more anchors lower error monotonically (`m=1→12`: `0.046→0.021`). At the deeper layers
+the margin widens (L12 `m=1=0.006` vs Nyström `0.046`; L18 `m=1=0.004` vs Nyström
+`0.037`). The earlier "`m=1` not accurate enough" verdict was an artifact of the
+worst-case random-Gaussian regime; real activations invert it.
+
+The two *learned*-projection baselines — **Linformer** (`>1`) and **luna** (`≈0.4`) —
+are shown for reference only and are **not** part of this accuracy claim: their
+defining projections are trained end-to-end in their papers but are left at random
+initialisation here (see "Fairness of the accuracy comparison" below), so their
+rel-err reflects random compressions rather than the methods as intended.
+
+On the **speed** axis (bf16 forward, `d=128`) there is a sharp cliff: `m=1` is fast
+(`6.3 ms` at `n=8192`, ~4× faster than Performer, on par with linear/Nyström), but
+`m≥2` jumps ~14× to `≈89–108 ms` — the k-means anchor build dominates. So **`m=1` is
+the only config on the speed frontier**; `m≥2` buys lower error at a large latency cost.
+
+**Both-axes verdict (the project's central question):** joining speed × worst-layer
+accuracy at `d=128, n=8192, bf16`, **every `m∈{1…12}` is Pareto-non-dominated** — no
+baseline beats any of them on *both* axes, because piecewise wins accuracy against the
+training-free baselines by a wide margin. But **no `m` beats all baselines *strictly on
+both* axes at once**: luna (`3.8 ms`) and Nyström (`5.7 ms`) are faster than even `m=1`
+(`6.3 ms`), so `m=1` wins accuracy-decisively (over Performer/Nyström) while being
+1.1–1.6× slower than the two fastest linear baselines. The honest headline: **`m=1` is
+the accuracy-dominant point of the efficient-attention frontier at near-top speed**,
+and anchor count is a monotone accuracy dial above it. (Measured bf16 fwd-only on A100;
+`results/cuda_scaling_anchors_a100.json`, figures under
+`results/anchor_sweep/d128/{accuracy_per_layer,speed,pareto}/`.)
+
+### Fairness of the accuracy comparison
+
+Every method is scored **untrained** on the same real GPT-Neo-1.3B `Q/K/V`, against an
+exact-softmax ground truth. That is a fair test for the **training-free**
+approximations — Performer (an unbiased random-feature estimator of the softmax
+kernel), Nyström (landmarks = segment means of the actual `Q/K`, so data-adaptive at
+inference), and piecewise itself (k-means anchors fit on the input) — all of which are
+designed to work with no training. It is **not** fair to **Linformer** and **luna**,
+whose defining components are learned projections (`E`/`F`; pack queries) that their
+papers train end-to-end; left at random init they compute a random compression, so
+their large rel-err is not representative and they are excluded from the accuracy claim
+above (kept only as a reference line, flagged "untrained" in the figures). Two
+secondary caveats: piecewise's anchor count `m` is swept while each baseline's rank
+(features/landmarks/`k`/pack) is frozen at a single un-tuned setting, and the metric is
+relative error *to softmax*, which structurally suits a first-order-Taylor-of-softmax
+method. The clean follow-up that would make Linformer/luna a strictly fair comparison
+is to fit their projections to the captured activations (unsupervised distillation to
+the exact-softmax output) before scoring — an open item, not yet run.
 
 ## Speed
 
@@ -162,11 +207,61 @@ off by default. Data: `results/reduced_build_a100.json` (time/memory/FLOP) and
 `results/reduced_accuracy_gate_d128.json` (accuracy). Measured on A100 (not H100);
 the accuracy verdict is hardware-independent.
 
+## GPU speed–accuracy Pareto at realistic `d`: the existential gate, resolved
+
+The speed claim was measured directly on an NVIDIA A100 80GB across per-head
+`d ∈ {64, 128}`, `n ∈ {1024…16384}` at fixed `batch·heads = 256`, both `fp32` and
+`bf16`, forward and forward+backward, non-causal and causal — the full grid the
+efficiency framing depends on (`results/cuda_scaling_a100.json`, forward-pass
+latency below is `bf16`). Every softmax reference (a manual `O(n²)` build and a
+fair `scaled_dot_product_attention` with the flash and memory-efficient backends
+disabled) runs out of memory by `n=8192` at both dimensions, so the sub-quadratic
+methods are the only survivors at long context.
+
+The headline concern — that the `d²` factor would erase the speed lead at the
+realistic per-head `d=128` — **does not hold**. At `d=128` the single-anchor
+`m=1` build is **~4× faster than Performer at every length** (`0.26–0.29×` its
+latency) and roughly ties Nyströmformer. But it does **not dominate the frontier**:
+Luna (pack 64) is ~1.65× faster still, so `m=1` is Pareto-competitive, not
+Pareto-best, on latency alone.
+
+Joining that latency with the real-activation accuracy above gives the honest
+picture at the representative operating point (`d=128`, `n=8192`, `bf16`):
+
+| method | fwd latency | peak mem | worst-layer rel-err |
+|---|---|---|---|
+| luna (pack 64) | 3.8 ms | 3.2 GB | ~0.9 (Performer-class) |
+| nyströmformer L=64 | 5.7 ms | 3.8 GB | 0.52 |
+| **piecewise `m=1`** | **6.3 ms** | **3.2 GB** | 0.67 |
+| linformer k=256 | 9.2 ms | 4.4 GB | — |
+| performer M=256 | 24.2 ms | 6.5 GB | 0.95 |
+| **piecewise `m=64`** | **OOM** | — | **0.24 (best of all)** |
+| softmax (manual / SDPA-math) | OOM | — | 0 (exact) |
+
+The tension the whole project turns on is now measured on both axes at once: the
+configuration that wins **accuracy** (`m=64`, rel-err `0.24`, best of every method)
+**runs out of memory at `n≥8192`** on the current dense build, while the
+configuration that wins **speed/memory** (`m=1`) is the least accurate piecewise
+setting. Anchor count is a monotone accuracy dial (`m=1→64`: `0.67→0.51→0.43→0.24`)
+that trades directly against latency and memory; no single `m` is non-dominated on
+both axes against the linear baselines. The causal path confirms the memory ceiling
+directly — causal `m=1` materialises a `(batch, n, d, d)` cumulative-sum tensor, so
+it OOMs at `n=8192, d=64` in `fp32` but fits in `bf16` (and OOMs at `n=16384`).
+
+Consequence for the framing: the defensible headline is **not "fastest"** but that
+piecewise is a deterministic linear-attention method whose single anchor-count knob
+sweeps a competitive accuracy–latency frontier — `m=1` sits with the fast linear
+baselines (4× over Performer) and `m=64` reaches the lowest error of any method,
+with the open engineering problem being to make the accurate high-`m` build fit in
+memory at long context. Reproduced by `benchmarks/harness/run_cuda_scaling.py`;
+measured on A100 (not H100), a hardware-independent Pareto verdict.
+
 ## What is not yet established
 
-- GPU speed–accuracy Pareto at realistic per-head `d` (64–128) across
-  `n∈{1k…16k}`, fp32 and bf16, forward and forward+backward — the existential
-  gate for the efficiency framing.
+- Whether the accurate high-`m` build can be made to **fit in memory at long
+  context** (`n≥8192`, `d=128`) — `m=64` currently OOMs on the dense
+  `(batch, m, d, d)` operator, which is what keeps the accuracy-winning config off
+  the long-context frontier. This is now the primary open problem for the framing.
 - Whether an SVD-free variant of the reduced build (amortized/cached `R_j` under
   frozen anchors, or a batched randomized range-finder) can realize the confirmed
   query-residual low rank as a wall-clock win. The straightforward per-forward
