@@ -107,9 +107,12 @@ def attention_hparams(method: str, max_length: int, pooling_mode: str = "CLS") -
         "luna": {"num_pack": budget},
         # Multi-anchor k-means piecewise; anchor count is the method's own dial
         # (a linearization-granularity knob, NOT a rank budget — see Notes above).
-        # Real-activation sweeps show m>1 is a genuine accuracy lever, so the
-        # comparison uses a multi-anchor config rather than the single-anchor mean.
-        "piecewise_kmeans": {"num_anchors": 16, "kmeans_iters": 3},
+        # The single-anchor mean (``piecewise``, m=1) and this m=4 k-means build are
+        # both compared: on trained tasks the anchor count is a convergence/seed
+        # knob rather than a capacity budget, and m=1 is competitive, so the sweep
+        # brackets the low end (m=1) and a small multi-anchor point (m=4).
+        "piecewise": {},  # single-anchor mean pseudo-query (m=1)
+        "piecewise_kmeans": {"num_anchors": 4, "kmeans_iters": 3},  # m=4
     }
     return dict(tables.get(method, {}))
 
@@ -139,9 +142,10 @@ def encoder_seq_padding(max_length: int, pooling_mode: str = "CLS") -> int:
 #: Methods trained end-to-end in the fair ListOps comparison. Every mechanism's
 #: defining component (Linformer E/F, Luna pack queries, piecewise anchors) is
 #: optimised inside the encoder, which is the structural fix for scoring the
-#: learned-projection baselines at random init. ``piecewise_kmeans`` is the
-#: multi-anchor build (its ``num_anchors`` actually takes effect, unlike the
-#: single-anchor ``piecewise`` mean).
+#: learned-projection baselines at random init. Two piecewise builds are compared:
+#: ``piecewise`` is the single-anchor mean (m=1) and ``piecewise_kmeans`` is the
+#: multi-anchor k-means build (m=4 via :func:`attention_hparams`), so the sweep
+#: brackets the anchor-count dial at both the m=1 and a small multi-anchor point.
 LISTOPS_METHODS = [
     "standard",
     "linear",
@@ -149,5 +153,6 @@ LISTOPS_METHODS = [
     "nystromformer",
     "linformer",
     "luna",
+    "piecewise",
     "piecewise_kmeans",
 ]
