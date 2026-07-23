@@ -8,17 +8,31 @@ points.
 
 ## One-line state
 
-Piecewise attention is uniformly faster than standard softmax at long context.
-At a single anchor (`m=1`) it is Pareto-competitive with the linear-attention
-baselines on GPU — **~4× faster than Performer at `d=128`**, tying Nyströmformer —
-but is not accurate enough on real trained-model activations. At high anchor count
-(`m=64`) it reaches the **lowest error of any method** (rel-err `0.24`) but is the
-slow config and, on the current dense build, **runs out of memory at `n≥8192`**.
-**The accuracy win and the speed/memory loss are the same configuration**, and the
-GPU Pareto measurement (A100, `d=64/128`, `n≤16384`) confirms no single `m` is
-non-dominated on both axes: anchor count is a monotone accuracy dial traded against
-latency and memory. The open problem is making the accurate high-`m` build fit in
-memory at long context.
+Piecewise attention is uniformly faster than standard softmax at long context and,
+on **real trained-model activations**, is more accurate than every efficient-attention
+baseline at *every* anchor count. On the accuracy axis the story is decisive: at the
+worst layer (GPT-Neo-1.3B L6, `d=128`, native `n=512`), even the single-anchor `m=1`
+build (rel-err `0.046`) beats the best baseline (Nyström `0.071`), and the whole
+`m=1…12` curve sits below all baselines (Performer/luna/linear `≈0.4`, Linformer
+`>1`); more anchors lower error monotonically (`m=1→12`: `0.046→0.021`). The earlier
+"`m=1` not accurate enough" verdict was an artifact of the worst-case random-Gaussian
+regime; real activations invert it.
+
+On the **speed** axis (bf16 forward, `d=128`) there is a sharp cliff: `m=1` is fast
+(`6.3 ms` at `n=8192`, ~4× faster than Performer, on par with linear/Nyström), but
+`m≥2` jumps ~14× to `≈89–108 ms` — the k-means anchor build dominates. So **`m=1` is
+the only config on the speed frontier**; `m≥2` buys lower error at a large latency cost.
+
+**Both-axes verdict (the project's central question):** joining speed × worst-layer
+accuracy at `d=128, n=8192, bf16`, **every `m∈{1…12}` is Pareto-non-dominated** — no
+baseline beats any of them on *both* axes, because piecewise wins accuracy against all
+of them by a wide margin. But **no `m` beats all baselines *strictly on both* axes at
+once**: luna (`3.8 ms`) and Nyström (`5.7 ms`) are faster than even `m=1` (`6.3 ms`),
+so `m=1` wins accuracy-decisively while being 1.1–1.6× slower than the two fastest
+linear baselines. The honest headline: **`m=1` is the accuracy-dominant point of the
+efficient-attention frontier at near-top speed**, and anchor count is a monotone
+accuracy dial above it. (Measured bf16 fwd-only on A100; `results/cuda_scaling_anchors_a100.json`,
+figures `results/anchor_sweep_d128_{accuracy,speed}.png`.)
 
 ## Speed
 
