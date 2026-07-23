@@ -39,6 +39,7 @@ class BaseAttention(nn.Module, ABC):
         Q: torch.Tensor,
         K: torch.Tensor,
         V: torch.Tensor,
+        key_padding_mask: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         """Compute attention output.
 
@@ -46,6 +47,15 @@ class BaseAttention(nn.Module, ABC):
             Q: Query tensor of shape (batch, seq_len, dim)
             K: Key tensor of shape (batch, seq_len, dim)
             V: Value tensor of shape (batch, seq_len, dim)
+            key_padding_mask: Optional bool tensor ``(batch, key_len)`` where
+                ``True`` marks a valid key and ``False`` a padded one. When given,
+                padded key positions must contribute nothing to any query's output.
+                Each mechanism applies it in the axis its own aggregation requires
+                (softmax-over-keys methods add a large negative bias ``-1e9`` to
+                padded scores before the softmax; feature-map methods mask ``φ(K)``
+                in numerator *and* normalizer). Non-causal use only; ``None``
+                attends over all keys. Assumes at least one valid key per row (a
+                fully-padded row would get a uniform, not undefined, weighting).
 
         Returns:
             output: Attention output of shape (batch, seq_len, dim)
@@ -81,6 +91,7 @@ class StandardAttention(BaseAttention):
         Q: torch.Tensor,
         K: torch.Tensor,
         V: torch.Tensor,
+        key_padding_mask: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Compute standard softmax attention.
 
@@ -88,6 +99,11 @@ class StandardAttention(BaseAttention):
             Q: Query tensor of shape (batch, seq_len, dim)
             K: Key tensor of shape (batch, seq_len, dim)
             V: Value tensor of shape (batch, seq_len, dim)
+            key_padding_mask: Optional bool ``(batch, key_len)``, True=valid. Padded
+                key columns get score ``-1e9`` before the softmax so they receive
+                ~zero weight and leave both numerator and denominator. Zeroing K/V
+                rows would NOT work here: a zero score still yields ``exp(0)=1`` in
+                the softmax denominator, corrupting the normalizer.
 
         Returns:
             output: Attention output of shape (batch, seq_len, dim)
@@ -107,6 +123,12 @@ class StandardAttention(BaseAttention):
             # Create causal mask: lower triangular matrix (1 for allowed, 0 for blocked)
             causal_mask = torch.tril(torch.ones(seq_len, seq_len, device=Q.device))
             scores = scores.masked_fill(causal_mask == 0, -1e9)
+
+        # Exclude padded key positions: set their score to -1e9 so softmax gives
+        # them ~zero weight and they drop out of the denominator. Broadcast the
+        # (batch, key_len) mask over the query axis.
+        if key_padding_mask is not None:
+            scores = scores.masked_fill(~key_padding_mask.unsqueeze(1), -1e9)
 
         # Apply softmax
         attn_weights = F.softmax(scores, dim=-1)
@@ -178,6 +200,7 @@ class LinearAttention(BaseAttention):
         Q: torch.Tensor,
         K: torch.Tensor,
         V: torch.Tensor,
+        key_padding_mask: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Compute linear attention with kernel feature maps.
 
@@ -185,6 +208,13 @@ class LinearAttention(BaseAttention):
             Q: Query tensor of shape (batch, seq_len, dim)
             K: Key tensor of shape (batch, seq_len, dim)
             V: Value tensor of shape (batch, seq_len, dim)
+            key_padding_mask: Optional bool ``(batch, key_len)``, True=valid.
+                Applied by zeroing ``φ(K)`` rows at padded positions (non-causal
+                only). This is essential and subtle: the normalizer sums ``φ(K)``
+                over all keys, and ``φ(0) ≠ 0`` (e.g. ``elu(0)+1 = 1``), so zeroing
+                *raw* K would leave a spurious ``φ(0)`` in the denominator. Masking
+                ``φ(K)`` itself removes padded keys from both numerator and
+                normalizer.
 
         Returns:
             output: Attention output of shape (batch, seq_len, dim)
@@ -193,6 +223,12 @@ class LinearAttention(BaseAttention):
         # Apply feature maps
         Q_prime = self.feature_map(Q)  # (batch, seq_len, dim)
         K_prime = self.feature_map(K)  # (batch, seq_len, dim)
+
+        # Exclude padded keys by zeroing their feature rows. Must be applied to
+        # φ(K), not raw K: φ(0) is nonzero, so masking raw K would still pollute
+        # the K_prime.sum normalizer below. Non-causal path only.
+        if key_padding_mask is not None and not self.causal:
+            K_prime = K_prime * key_padding_mask.unsqueeze(-1).to(K_prime.dtype)
 
         if self.causal:
             # Causal masking using cumulative sum
@@ -327,6 +363,7 @@ class PerformerAttention(BaseAttention):
         Q: torch.Tensor,
         K: torch.Tensor,
         V: torch.Tensor,
+        key_padding_mask: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Compute Performer (FAVOR+) attention.
 
@@ -334,6 +371,13 @@ class PerformerAttention(BaseAttention):
         ----------
         Q, K, V:
             Query/key/value tensors of shape ``(batch, seq_len, dim)``.
+        key_padding_mask:
+            Optional bool ``(batch, key_len)``, True=valid. Applied by zeroing
+            ``φ(K)`` rows at padded positions (non-causal only). As with linear
+            attention this must mask ``φ(K)`` rather than raw K: the FAVOR+ map has
+            ``φ(0) = 1/sqrt(m) + eps > 0``, so a zeroed raw-K row would still add a
+            spurious positive term to the ``K_prime.sum`` normalizer. Multiplying
+            ``φ(K)`` by the mask (post-feature-map) also strips the ``+eps``.
 
         Returns
         -------
@@ -344,6 +388,13 @@ class PerformerAttention(BaseAttention):
         """
         Q_prime = self.feature_map(Q)  # (batch, seq_len, num_features)
         K_prime = self.feature_map(K)  # (batch, seq_len, num_features)
+
+        # Exclude padded keys by zeroing their feature rows (φ(K), post-map, so the
+        # +eps is stripped too). φ(0) is strictly positive here, so masking raw K
+        # would leak into the normalizer; masking φ(K) removes padded keys from both
+        # numerator and denominator. Non-causal path only.
+        if key_padding_mask is not None and not self.causal:
+            K_prime = K_prime * key_padding_mask.unsqueeze(-1).to(K_prime.dtype)
 
         if self.causal:
             # Prefix-sum formulation: query i attends to keys 0..i.
@@ -542,6 +593,7 @@ class PiecewiseAttention(BaseAttention):
         pseudo_queries: torch.Tensor,
         K: torch.Tensor,
         V: torch.Tensor,
+        key_padding_mask: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Compute exact attention output and Jacobian at pseudo-query.
 
@@ -552,6 +604,10 @@ class PiecewiseAttention(BaseAttention):
             pseudo_query: Representative query, shape (batch, dim)
             K: Key tensor of shape (batch, seq_len, dim)
             V: Value tensor of shape (batch, seq_len, dim)
+            key_padding_mask: Optional bool ``(batch, seq_len)``, True=valid. Padded
+                key scores are set to ``-inf`` before the softmax so they receive
+                ~zero weight; the Jacobian factors below reuse ``attn_weights`` and
+                inherit the exclusion automatically.
 
         Returns:
             output: Attention output at pseudo-query, shape (batch, dim)
@@ -563,6 +619,10 @@ class PiecewiseAttention(BaseAttention):
         # Compute attention scores: (batch, seq_len)
         # scores = pseudo_queries @ K^T for each batch
         scores = (K @ pseudo_queries.unsqueeze(-1)).squeeze(-1) * scale_factor
+
+        # Exclude padded keys before the softmax over the key axis.
+        if key_padding_mask is not None:
+            scores = scores.masked_fill(~key_padding_mask, -1e9)
 
         # Compute attention weights: (batch, seq_len)
         attn_weights = torch.softmax(scores, dim=-1)
@@ -675,6 +735,7 @@ class PiecewiseAttention(BaseAttention):
         Q: torch.Tensor,
         anchors: torch.Tensor,
         assign: torch.Tensor,
+        key_padding_mask: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Build a reduced-rank second-moment operator on the query-residual axis.
 
@@ -742,6 +803,12 @@ class PiecewiseAttention(BaseAttention):
             for bi in range(b):
                 for j in range(m):
                     mask = assign[bi] == j
+                    # Exclude padded queries from the residual set: a padded
+                    # query's value must not shape the SVD basis (which is applied
+                    # to valid queries sharing this anchor), or it would leak into
+                    # their reduced-rank output.
+                    if key_padding_mask is not None:
+                        mask = mask & key_padding_mask[bi]
                     cnt = int(mask.sum().item())
                     fallback = cnt < self._MIN_CLUSTER
                     if not fallback:
@@ -795,6 +862,7 @@ class PiecewiseAttention(BaseAttention):
         K: torch.Tensor,
         V: torch.Tensor,
         anchors: torch.Tensor,
+        key_padding_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Piecewise-linear attention with per-query nearest-anchor expansion.
 
@@ -845,6 +913,13 @@ class PiecewiseAttention(BaseAttention):
         # operator M, which is only ever (batch, m, dim, dim) — no per-query
         # (dim, dim) tensor is ever formed.
         scores = torch.einsum("bmd,bnd->bmn", anchors, K) * scale_factor
+        # Exclude padded keys before the softmax over the key axis (n). The mask
+        # (b, n) broadcasts over the anchor axis m; masking scores here propagates
+        # to out_anchor and every Jacobian factor (weighted_k / second-moment /
+        # top-p / reduced-rank builds all consume alpha), so no separate build
+        # masking is needed.
+        if key_padding_mask is not None:
+            scores = scores.masked_fill(~key_padding_mask.unsqueeze(1), -1e9)
         alpha = torch.softmax(scores, dim=-1)  # (batch, m, seq_len)
         # Zeroth-order term A(a_j): always built from ALL keys, so the anchor
         # value is exact even when the Jacobian factors are top-p truncated.
@@ -870,7 +945,7 @@ class PiecewiseAttention(BaseAttention):
             # d′_j directions each cluster's Δq excites. weighted_k stays exact.
             weighted_k = torch.einsum("bmn,bnd->bmd", alpha, K)  # (batch, m, dim)
             R, second_moment, _dprime = self._build_jacobian_factors_reduced(
-                alpha, V, K, Q, anchors, assign
+                alpha, V, K, Q, anchors, assign, key_padding_mask=key_padding_mask
             )  # R: (b, m, dim, d′_max), second_moment (M_red): (b, m, dim, d′_max)
         elif self.build_topp is None:
             # Exact dense build of the Jacobian factors.
@@ -984,6 +1059,7 @@ class PiecewiseAttention(BaseAttention):
         Q: torch.Tensor,
         K: torch.Tensor,
         V: torch.Tensor,
+        key_padding_mask: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Compute piecewise linear attention.
 
@@ -991,6 +1067,13 @@ class PiecewiseAttention(BaseAttention):
             Q: Query tensor of shape (batch, seq_len, dim)
             K: Key tensor of shape (batch, seq_len, dim)
             V: Value tensor of shape (batch, seq_len, dim)
+            key_padding_mask: Optional bool ``(batch, key_len)``, True=valid. The
+                anchor weights are a softmax over the key axis (both single- and
+                multi-anchor), so padded key scores are set to ``-inf`` before that
+                softmax and drop out of the anchor output *and* every Jacobian
+                factor (which reuse the same weights). Zeroing K/V rows would not
+                work — a zeroed key still gets ``exp(0)=1`` in the softmax
+                denominator. Non-causal only (the causal path ignores the mask).
 
         Returns:
             output: Attention output of shape (batch, seq_len, dim)
@@ -1067,23 +1150,38 @@ class PiecewiseAttention(BaseAttention):
             )
             if use_multi:
                 # Multi-anchor mode: each query is linearized around its nearest
-                # anchor. The anchors double as the reported pseudo_queries.
-                anchors = self.anchor_strategy.select(Q)  # (batch, m, dim)
-                output = self._compute_multi_anchor(Q, K, V, anchors)
+                # anchor. The anchors double as the reported pseudo_queries. The
+                # mask is passed to anchor selection so padded queries don't pull
+                # the anchors (which would perturb valid queries' outputs).
+                anchors = self.anchor_strategy.select(
+                    Q, key_padding_mask=key_padding_mask
+                )  # (batch, m, dim)
+                output = self._compute_multi_anchor(
+                    Q, K, V, anchors, key_padding_mask=key_padding_mask
+                )
                 pseudo_queries = anchors
             else:
                 # Single-anchor mode (original implementation).
-                # Step 1: Select representative query for each batch sample.
+                # Step 1: Select representative query for each batch sample. The
+                # pseudo-query must exclude padded queries — otherwise a padded
+                # token shifts the shared anchor and leaks into every valid
+                # query's Taylor expansion.
                 if self.anchor_strategy is not None:
                     # A single-anchor strategy yields (batch, 1, dim); squeeze it
                     # back to the legacy (batch, dim) representative query.
-                    pseudo_queries = self.anchor_strategy.select(Q).squeeze(1)
+                    pseudo_queries = self.anchor_strategy.select(
+                        Q, key_padding_mask=key_padding_mask
+                    ).squeeze(1)
+                elif key_padding_mask is not None:
+                    # Masked mean over valid queries for the default selector.
+                    w = key_padding_mask.unsqueeze(-1).to(Q.dtype)
+                    pseudo_queries = (Q * w).sum(dim=1) / w.sum(dim=1).clamp(min=1.0)
                 else:
                     pseudo_queries = self.pseudo_query_fn(Q)  # (batch, dim)
 
                 # Step 2: Compute exact attention and Jacobian at pseudo-queries
                 pseudo_outputs, jacobians = self._compute_attention_and_jacobian(
-                    pseudo_queries, K, V
+                    pseudo_queries, K, V, key_padding_mask=key_padding_mask
                 )  # (batch, dim), (batch, dim, dim)
 
                 # Step 3: Apply first-order Taylor approximation to all queries
@@ -1259,6 +1357,7 @@ class NystromformerAttention(BaseAttention):
         Q: torch.Tensor,
         K: torch.Tensor,
         V: torch.Tensor,
+        key_padding_mask: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         """Compute Nyströmformer attention.
 
@@ -1266,6 +1365,16 @@ class NystromformerAttention(BaseAttention):
         ----------
         Q, K, V:
             Query/key/value tensors of shape ``(batch, seq_len, dim)``.
+        key_padding_mask:
+            Optional bool ``(batch, key_len)``, True=valid. Nyström has two leaks
+            for padded keys, both handled here: (1) ``kernel3`` softmaxes over the
+            key axis, so padded columns are set to ``-inf`` before that softmax;
+            (2) landmarks are contiguous segment *means* over the sequence, so a
+            padded position would dilute its segment's landmark toward zero and
+            corrupt every query's output globally — landmarks are therefore built
+            with a per-segment *masked* mean (dividing by the valid count, with a
+            guard for all-padding segments). The exact-softmax fallback path is
+            masked identically to ``StandardAttention``. Non-causal only.
 
         Returns
         -------
@@ -1294,6 +1403,8 @@ class NystromformerAttention(BaseAttention):
         # softmax attention instead.
         if seq_len <= m:
             scores = torch.matmul(Q_s, K_s.transpose(-2, -1))  # (b, n, n)
+            if key_padding_mask is not None:
+                scores = scores.masked_fill(~key_padding_mask.unsqueeze(1), -1e9)
             attn = F.softmax(scores, dim=-1)
             output = self.dropout(torch.matmul(attn, V))
             self.last_num_landmarks = seq_len
@@ -1317,16 +1428,31 @@ class NystromformerAttention(BaseAttention):
         segment = seq_len // m
 
         # Landmarks as contiguous segment means: reshape (b, m, segment, d) and
-        # average within each segment.
-        Q_landmarks = Q_s.reshape(batch, m, segment, dim).mean(dim=2)  # (b, m, d)
-        K_landmarks = K_s.reshape(batch, m, segment, dim).mean(dim=2)  # (b, m, d)
+        # average within each segment. With a key-padding mask, use a masked mean
+        # so padded positions do not dilute a segment's landmark (a plain mean over
+        # zeroed padded rows would bias every landmark, corrupting all queries).
+        if key_padding_mask is not None:
+            seg_mask = key_padding_mask.reshape(batch, m, segment, 1).to(Q_s.dtype)
+            seg_count = seg_mask.sum(dim=2).clamp(min=1.0)  # (b, m, 1), >=1 guards empty segs
+            Q_landmarks = (Q_s.reshape(batch, m, segment, dim) * seg_mask).sum(dim=2) / seg_count
+            K_landmarks = (K_s.reshape(batch, m, segment, dim) * seg_mask).sum(dim=2) / seg_count
+        else:
+            Q_landmarks = Q_s.reshape(batch, m, segment, dim).mean(dim=2)  # (b, m, d)
+            K_landmarks = K_s.reshape(batch, m, segment, dim).mean(dim=2)  # (b, m, d)
 
         # Three softmax kernels (scores already carry the 1/sqrt(dim) scale).
         kernel1 = F.softmax(torch.matmul(Q_s, K_landmarks.transpose(-2, -1)), dim=-1)  # (b, n, m)
         kernel2 = F.softmax(
             torch.matmul(Q_landmarks, K_landmarks.transpose(-2, -1)), dim=-1
         )  # (b, m, m)
-        kernel3 = F.softmax(torch.matmul(Q_landmarks, K_s.transpose(-2, -1)), dim=-1)  # (b, m, n)
+        # kernel3 softmaxes over the key axis n, so padded key columns must be
+        # excluded before the softmax or they steal normalized mass from valid keys.
+        kernel3_scores = torch.matmul(Q_landmarks, K_s.transpose(-2, -1))  # (b, m, n)
+        if key_padding_mask is not None:
+            kernel3_scores = kernel3_scores.masked_fill(
+                ~key_padding_mask.unsqueeze(1), -1e9
+            )
+        kernel3 = F.softmax(kernel3_scores, dim=-1)  # (b, m, n)
 
         # Iterative pseudo-inverse of the landmark-to-landmark kernel.
         kernel2_pinv = self._iterative_pinv(kernel2)  # (b, m, m)
@@ -1445,6 +1571,7 @@ class LinformerAttention(BaseAttention):
         Q: torch.Tensor,
         K: torch.Tensor,
         V: torch.Tensor,
+        key_padding_mask: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Compute Linformer low-rank attention.
 
@@ -1452,6 +1579,14 @@ class LinformerAttention(BaseAttention):
         ----------
         Q, K, V:
             Query/key/value tensors of shape ``(batch, seq_len, dim)``.
+        key_padding_mask:
+            Optional bool ``(batch, key_len)``, True=valid. Applied by zeroing
+            padded rows of K and V *before* the E/F sequence-axis projection: the
+            einsum multiplies each position by a projection weight, so a zeroed row
+            contributes exactly nothing to any of the ``k`` compressed slots. This
+            is the one method where row-zeroing is exact (there is no per-key
+            softmax and no feature map). Masking after projection would be
+            meaningless, as the ``k`` axis no longer corresponds to positions.
 
         Returns
         -------
@@ -1474,6 +1609,15 @@ class LinformerAttention(BaseAttention):
                 f"projection has no rows for positions beyond max_seq_len, so "
                 f"this baseline is same-length-only."
             )
+
+        # Exclude padded keys/values by zeroing their rows before the sequence-axis
+        # projection. Exact here because the E/F einsum is linear in each position:
+        # a zeroed row drops out of every compressed slot (no per-key softmax, no
+        # feature map that would leave φ(0) ≠ 0).
+        if key_padding_mask is not None:
+            kv_mask = key_padding_mask.unsqueeze(-1).to(K.dtype)
+            K = K * kv_mask
+            V = V * kv_mask
 
         # Use the first n rows of each projection: (n, k).
         E_n = self.E[:seq_len]
@@ -1581,6 +1725,7 @@ class LunaAttention(BaseAttention):
         Q: torch.Tensor,
         K: torch.Tensor,
         V: torch.Tensor,
+        key_padding_mask: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Compute Luna nested (pack -> summary -> unpack) attention.
 
@@ -1588,6 +1733,14 @@ class LunaAttention(BaseAttention):
         ----------
         Q, K, V:
             Query/key/value tensors of shape ``(batch, seq_len, dim)``.
+        key_padding_mask:
+            Optional bool ``(batch, key_len)``, True=valid. Applied only to the
+            Step-1 *pack* softmax (``scores1``, over the n keys), where padded
+            columns are set to ``-inf`` so they leave the packed summary ``Yp``.
+            Step 2 softmaxes over the ``p`` summary vectors, which are already
+            clean once ``Yp`` is, so it needs no masking. Zeroing K/V rows would
+            not work: the pack softmax over keys still gives a zeroed column
+            ``exp(0)=1`` weight, polluting ``Yp`` and hence every query output.
 
         Returns
         -------
@@ -1606,6 +1759,10 @@ class LunaAttention(BaseAttention):
         # Step 1 (pack): the p pack queries attend over the whole sequence.
         # scores1: (batch, p, n), softmax over the n keys.
         scores1 = torch.matmul(P, K.transpose(-2, -1)) * scale
+        # Exclude padded key columns before the key-axis softmax so they leave
+        # the packed summary Yp entirely.
+        if key_padding_mask is not None:
+            scores1 = scores1.masked_fill(~key_padding_mask.unsqueeze(1), -1e9)
         attn1 = F.softmax(scores1, dim=-1)
         packed_context = torch.matmul(attn1, V)  # (batch, p, dim) == Yp
 

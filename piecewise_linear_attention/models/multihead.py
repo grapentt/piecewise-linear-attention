@@ -4,7 +4,7 @@ This module provides a drop-in replacement for standard multi-head attention
 that works with StandardAttention, LinearAttention, and PiecewiseAttention mechanisms.
 """
 
-from typing import Callable, Optional
+from typing import Callable, Dict, Optional
 
 import torch
 import torch.nn as nn
@@ -44,6 +44,7 @@ class MultiHeadAttention(nn.Module):
         causal: bool = False,
         eps: float = 1e-6,
         causal_pseudo_query: str = "mean",
+        attn_kwargs: Optional[Dict] = None,
         device: Optional[torch.device] = None,
     ):
         """Initialize multi-head attention.
@@ -59,6 +60,14 @@ class MultiHeadAttention(nn.Module):
             eps: For linear attention, numerical-stability constant
             causal_pseudo_query: For causal piecewise attention, anchor strategy
                 ("mean" or "first")
+            attn_kwargs: Extra mechanism-specific options forwarded verbatim to
+                ``build_attention`` (e.g. ``num_features`` for Performer,
+                ``num_landmarks`` for Nyström, ``k``/``max_seq_len`` for Linformer,
+                ``num_pack`` for Luna, ``num_anchors``/``kmeans_iters`` for
+                k-means piecewise). Merged after the fixed kwargs, so it can also
+                override them. Builders absorb unknown keys via ``**_ignored``, so
+                a key only affects the mechanism that names it. Defaults to ``None``
+                (registry defaults — today's behaviour).
             device: Device to place module on
         """
         super().__init__()
@@ -95,6 +104,7 @@ class MultiHeadAttention(nn.Module):
             eps=eps,
             pseudo_query_fn=pseudo_query_fn,
             causal_pseudo_query=causal_pseudo_query,
+            **(attn_kwargs or {}),
         )
 
         # For visualization and analysis
@@ -107,12 +117,19 @@ class MultiHeadAttention(nn.Module):
         self,
         attending_states: torch.Tensor,  # [batch, query_len, hidden_dim]
         attended_states: torch.Tensor,  # [batch, key_len, hidden_dim]
+        key_padding_mask: Optional[torch.Tensor] = None,  # [batch, key_len], True=valid
     ) -> torch.Tensor:
         """Compute multi-head attention.
 
         Args:
             attending_states: Query states - what attends [batch, query_len, hidden_dim]
             attended_states: Key/value states - what is attended to [batch, key_len, hidden_dim]
+            key_padding_mask: Optional bool mask ``[batch, key_len]`` where ``True``
+                marks a valid (attended) key position and ``False`` a padded one.
+                Threaded to the underlying mechanism's ``forward`` so padded keys are
+                excluded correctly (each mechanism masks in the axis its own
+                aggregation requires — see ``core/attention.py``). Non-causal use
+                only. ``None`` (default) attends over all keys.
 
         Returns:
             output: Attention output [batch, query_len, hidden_dim]
@@ -142,10 +159,23 @@ class MultiHeadAttention(nn.Module):
         Kh = split_heads(K, key_len)  # [batch*heads, key_len, attn_dim]
         Vh = split_heads(V, key_len)  # [batch*heads, key_len, attn_dim]
 
-        # One batched attention call over all heads.
+        # Expand the key-padding mask across heads to the flattened
+        # (batch*num_heads) axis so every head sees the same padded key columns.
+        # The mask is a property of the key sequence, identical for all heads.
+        mask_h = None
+        if key_padding_mask is not None:
+            mask_h = (
+                key_padding_mask.view(batch_size, 1, key_len)
+                .expand(batch_size, self.num_heads, key_len)
+                .reshape(batch_size * self.num_heads, key_len)
+            )
+
+        # One batched attention call over all heads. The mask is passed as a
+        # keyword so mechanisms that ignore it (unmasked / causal-only) are
+        # unaffected; every mechanism in the registry accepts and applies it.
         # extra is attention weights [batch*heads, query_len, key_len] for
         # standard attention, or an implementation-specific tensor otherwise.
-        attn_out, extra = self.attention(Qh, Kh, Vh)
+        attn_out, extra = self.attention(Qh, Kh, Vh, key_padding_mask=mask_h)
 
         # Merge heads back: [batch*heads, query_len, attn_dim]
         #   -> [batch, num_heads, query_len, attn_dim]

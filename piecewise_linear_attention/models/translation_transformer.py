@@ -47,6 +47,7 @@ class TransformerBlock(nn.Module):
         is_decoder: bool = False,
         dropout: float = 0.1,
         attention_type: str = "standard",
+        attn_kwargs: Optional[Dict] = None,
         device: Optional[torch.device] = None,
     ):
         super().__init__()
@@ -62,6 +63,7 @@ class TransformerBlock(nn.Module):
             attention_type=attention_type,
             dropout=dropout,
             causal=is_decoder,
+            attn_kwargs=attn_kwargs,
             device=device,
         )
         self.self_attn_layer_norm = nn.LayerNorm(hidden_dim)
@@ -75,6 +77,7 @@ class TransformerBlock(nn.Module):
                 attention_type=attention_type,
                 dropout=dropout,
                 causal=False,  # Cross-attention is never causal
+                attn_kwargs=attn_kwargs,
                 device=device,
             )
             self.cross_attn_layer_norm = nn.LayerNorm(hidden_dim)
@@ -92,18 +95,22 @@ class TransformerBlock(nn.Module):
         self,
         x: torch.Tensor,
         encoder_states: Optional[torch.Tensor] = None,
+        key_padding_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Forward pass through transformer block.
 
         Args:
             x: Input tensor [batch, seq_len, hidden_dim]
             encoder_states: Encoder states for cross-attention (decoder only) [batch, encoder_len, hidden_dim]
+            key_padding_mask: Optional bool mask ``[batch, seq_len]``, True=valid,
+                applied to the (non-causal encoder) self-attention so padded key
+                positions are excluded. ``None`` attends over all positions.
 
         Returns:
             Output tensor [batch, seq_len, hidden_dim]
         """
         # Self-attention (causal if decoder, bidirectional if encoder)
-        sa_out = self.self_attn(x, x)
+        sa_out = self.self_attn(x, x, key_padding_mask=key_padding_mask)
         sa_out = self.self_attn_dropout(sa_out)
         x = self.self_attn_layer_norm(x + sa_out)
 
