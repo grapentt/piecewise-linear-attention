@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "config": {
+    "benchmark": "listops_onehot_apply_fix_verification",
+    "purpose": "verify the one-hot anchor-select reformulation eliminates the bf16 scatter_add_ backward slow-path that dominated piecewise_kmeans m=4 training on LRA ListOps (A100, seq 2000, batch 32)",
+    "method": "piecewise_kmeans",
+    "num_anchors": 4,
+    "kmeans_iters": 3,
+    "seq_len": 2000,
+    "batch_size": 32,
+    "dim": 64
+  },
+  "metrics": {
+    "fixed_batch_bf16_fwdbwd_ms": 3.8,
+    "fixed_batch_fp32_fwdbwd_ms": 5.1,
+    "bf16_over_fp32_ratio": 0.75,
+    "isolated_select_bf16_gather_ms": 19.036,
+    "isolated_select_bf16_onehot_ms": 0.314,
+    "isolated_select_bf16_onehot_speedup": 60.59,
+    "isolated_select_fp32_gather_ms": 0.250,
+    "isolated_select_fp32_onehot_ms": 0.502
+  },
+  "environment": {
+    "gpu": "NVIDIA A100 80GB PCIe",
+    "torch": "2.1.2+cu121",
+    "device": "cuda"
+  },
+  "history": {
+    "note": "compare against results/lra/listops/warmup_backward_attribution.json (pre-fix): bf16/fp32 ratio was 2.57 (bf16 SLOWER), scatter_add_ was 86.8% of backward CUDA time. Post-fix the ratio is 0.75 (bf16 FASTER, normal tensor-core behavior) and scatter_add_ is absent from the top-8 CUDA ops.",
+    "profiler_top_cuda_ops_bf16_fwdbwd_postfix": [
+      {"op": "reduce_kernel", "self_cuda_frac": 0.109},
+      {"op": "ampere_sgemm_128x128_tn", "self_cuda_frac": 0.097},
+      {"op": "elementwise_kernel", "self_cuda_frac": 0.088},
+      {"op": "scatter_gather_elementwise_kernel", "self_cuda_frac": 0.066, "role": "low-collision bucket gather (n->m*C), NOT the eliminated high-collision anchor scatter_add_"}
+    ],
+    "eliminated": "aten::scatter_add_ (was 86.8% of backward CUDA time pre-fix) no longer appears in the top-8"
+  }
+}

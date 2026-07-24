@@ -382,6 +382,47 @@ class TestMultiAnchorAttention:
         assert out.dtype == torch.float16
         assert torch.isfinite(out).all()
 
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_onehot_select_matches_gather(self, dtype):
+        """The reduced-precision one-hot select equals the fp32 gather select.
+
+        The anchor-axis factor selection (n query positions → m anchor slots)
+        has two implementations gated on dtype: a ``torch.gather`` in fp32 and
+        an algebraically identical ``onehot(assign) @ factor`` in bf16/fp16 —
+        the latter chosen because ``gather``'s ``scatter_add_`` backward is a
+        pathological bf16 atomic slow-path. This asserts the two branches produce
+        the same multi-anchor output, so the reformulation is a pure
+        performance switch that does not change the math.
+
+        Locks: (a) the reduced-precision branch is numerically equivalent to the
+        fp32 gather branch (within the reduced-precision tolerance); (b) the
+        one-hot ``bmm`` selects the same per-query factors the gather would.
+
+        Catches: a wrong reduction axis or transpose in the one-hot ``bmm``, or
+        the branch silently diverging from the gather semantics.
+
+        Assessment: appropriate — this is the single load-bearing test that the
+        dtype-conditional select preserves output. It does not overlap
+        ``test_multi_anchor_runs_in_float16`` (that only checks it does not
+        crash) nor the fp32 fusion-algebra test (that never runs the one-hot
+        branch). One representative shape across both half dtypes suffices.
+        """
+        torch.manual_seed(0)
+        d, m = 16, 4
+        Q = torch.randn(2, 24, d)
+        K = torch.randn(2, 24, d)
+        V = torch.randn(2, 24, d)
+        attn = PiecewiseAttention(dim=d, scale=True, anchor_strategy=StrideAnchor(m))
+        with torch.no_grad():
+            ref, _ = attn(Q.float(), K.float(), V.float())  # fp32 gather branch
+            got, _ = attn(Q.to(dtype), K.to(dtype), V.to(dtype))  # one-hot branch
+        # Half-precision accumulation tolerance; the difference is rounding, not
+        # a different computation.
+        tol = 3e-2 if dtype is torch.float16 else 1.5e-1
+        assert torch.allclose(got.float(), ref, atol=tol), (
+            (got.float() - ref).abs().max().item()
+        )
+
     def test_grad_flows_through_multi_anchor(self):
         """Gradients reach Q, K, V despite non-differentiable assignment.
 
