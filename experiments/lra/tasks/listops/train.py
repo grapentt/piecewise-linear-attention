@@ -129,6 +129,30 @@ def main():
         help="Weight decay (default: use config value of 1e-4)",
     )
     parser.add_argument(
+        "--scheduler",
+        type=str,
+        default="none",
+        choices=["none", "cosine"],
+        help="LR schedule. 'none' (default) keeps a fixed learning rate — unchanged "
+        "from prior runs. 'cosine' applies a linear warmup then cosine decay to ~0 "
+        "over the full run (transformers.get_cosine_schedule_with_warmup), stepped "
+        "once per batch. Warmup length is set by --warmup-ratio / --warmup-steps.",
+    )
+    parser.add_argument(
+        "--warmup-steps",
+        type=int,
+        default=None,
+        help="Warmup steps for --scheduler cosine (default: config.warmup_steps=1000). "
+        "Ignored if --warmup-ratio is given.",
+    )
+    parser.add_argument(
+        "--warmup-ratio",
+        type=float,
+        default=None,
+        help="Warmup as a fraction of total steps for --scheduler cosine (e.g. 0.06). "
+        "Takes precedence over --warmup-steps when set.",
+    )
+    parser.add_argument(
         "--precision",
         type=str,
         default="fp32",
@@ -249,6 +273,20 @@ def main():
     print(f"  Val samples: {len(val_loader.dataset)}")
     print(f"  Test samples: {len(test_loader.dataset)}")
 
+    # Resolve the LR schedule (opt-in via --scheduler). total_steps drives the cosine
+    # decay horizon; warmup is a ratio of it or an explicit step count. Kept fixed for
+    # all methods so the schedule is identical across the comparison.
+    total_steps = len(train_loader) * config.num_epochs
+    if args.warmup_ratio is not None:
+        num_warmup_steps = round(args.warmup_ratio * total_steps)
+    elif args.warmup_steps is not None:
+        num_warmup_steps = args.warmup_steps
+    else:
+        num_warmup_steps = config.warmup_steps
+    if args.scheduler != "none":
+        print(f"  LR schedule: {args.scheduler}, warmup {num_warmup_steps}/{total_steps} "
+              f"steps, peak LR {config.learning_rate}")
+
     # Train each attention type
     all_results = {}
 
@@ -298,6 +336,10 @@ def main():
             "precision": args.precision,
             "padded_seq_len": model.position_embedding.num_embeddings,
             "num_parameters": num_params,
+            "scheduler": args.scheduler,
+            "warmup_steps": num_warmup_steps,
+            "warmup_ratio": args.warmup_ratio,
+            "total_steps": total_steps,
             "config": config.to_dict(),
         })
 
@@ -308,6 +350,18 @@ def main():
             weight_decay=config.weight_decay,
         )
         criterion = nn.CrossEntropyLoss()
+
+        # Optional per-step LR schedule (fresh per method — each has its own optimizer).
+        # transformers is only imported when a schedule is actually requested, so the
+        # --scheduler none path has no new dependency.
+        scheduler = None
+        if args.scheduler == "cosine":
+            from transformers import get_cosine_schedule_with_warmup
+            scheduler = get_cosine_schedule_with_warmup(
+                optimizer,
+                num_warmup_steps=num_warmup_steps,
+                num_training_steps=total_steps,
+            )
 
         # Training loop
         best_val_acc = 0.0
@@ -327,6 +381,7 @@ def main():
                 epoch=epoch,
                 grad_clip=config.grad_clip,
                 amp_dtype=amp_dtype,
+                scheduler=scheduler,
             )
             train_history.append(train_metrics)
 
@@ -349,6 +404,8 @@ def main():
                   f"data={format_time(train_metrics['data_time'])})")
             print(f"  Val:   loss={val_metrics['loss']:.4f}, "
                   f"acc={val_metrics['accuracy']*100:.2f}%")
+            if args.scheduler != "none":
+                print(f"  LR:    {train_metrics['lr']:.2e}")
 
             # Track best
             if val_metrics['accuracy'] > best_val_acc:
@@ -381,6 +438,10 @@ def main():
             'attn_kwargs': attn_kwargs,
             'padded_seq_len': model.position_embedding.num_embeddings,
             'precision': args.precision,
+            'scheduler': args.scheduler,
+            'warmup_steps': num_warmup_steps,
+            'warmup_ratio': args.warmup_ratio,
+            'total_steps': total_steps,
             'config': config.to_dict(),
             'num_parameters': num_params,
             'train_history': train_history,

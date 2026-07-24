@@ -44,6 +44,7 @@ def train_epoch(
     epoch: int,
     grad_clip: float = 1.0,
     amp_dtype: Optional[torch.dtype] = None,
+    scheduler=None,
 ) -> Dict[str, float]:
     """Train for one epoch.
 
@@ -58,9 +59,12 @@ def train_epoch(
         amp_dtype: If set (e.g. ``torch.bfloat16``), run the forward under
             ``torch.autocast`` in that dtype; master weights stay fp32. ``None``
             = full fp32.
+        scheduler: Optional per-step LR scheduler (e.g. a warmup+cosine schedule).
+            When given, ``scheduler.step()`` is called once per batch right after
+            ``optimizer.step()``. ``None`` = fixed LR (the default, unchanged).
 
     Returns:
-        Dictionary of metrics (loss, accuracy, time, throughput)
+        Dictionary of metrics (loss, accuracy, time, throughput, lr)
     """
     model.train()
 
@@ -95,6 +99,8 @@ def train_epoch(
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
         optimizer.step()
+        if scheduler is not None:
+            scheduler.step()  # per-step schedule (warmup/decay); no-op when None
         _sync(device)
         compute_time += time.time() - compute_start
 
@@ -126,6 +132,9 @@ def train_epoch(
         'compute_time': compute_time,
         'samples_per_sec': total_samples / epoch_time,
         'compute_samples_per_sec': total_samples / compute_time if compute_time else 0.0,
+        # LR at the end of the epoch — flat without a scheduler, tracing the
+        # warmup/decay curve with one. Auto-logged as train_lr by the MLflow tracker.
+        'lr': optimizer.param_groups[0]['lr'],
     }
 
 
