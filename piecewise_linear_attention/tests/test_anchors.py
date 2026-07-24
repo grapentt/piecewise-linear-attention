@@ -6,6 +6,7 @@ import pytest
 import torch
 
 from piecewise_linear_attention.core.anchors import (
+    CachedAnchor,
     CallableAnchor,
     FirstAnchor,
     KMeansAnchor,
@@ -118,6 +119,128 @@ class TestKMeansAnchor:
         assert torch.isfinite(anchors).all()
 
 
+class TestCachedAnchor:
+    """Anchor-reuse wrapper behavior.
+
+    Caching amortizes the recomputed clustering — the dominant term at low
+    anchor count — across forwards. These tests lock the invariants that make
+    that reuse safe; a break in any would silently corrupt training or return a
+    stale cache to a mismatched batch.
+    """
+
+    def test_reuses_within_refresh_window(self):
+        """The base strategy is called once per refresh window, not per call.
+
+        Locks: the caching actually caches. Catches a regression that recomputes
+        the base anchors every call (making the wrapper a no-op) or that never
+        refreshes (making it permanently stale).
+        """
+        calls = {"n": 0}
+
+        class _Counting(KMeansAnchor):
+            def select(self, Q, key_padding_mask=None):
+                calls["n"] += 1
+                return super().select(Q, key_padding_mask=key_padding_mask)
+
+        cached = CachedAnchor(_Counting(4, iters=1), refresh_every=3)
+        q = torch.randn(2, 16, 8)
+        for _ in range(7):
+            cached.select(q)
+        # Calls 0, 3, 6 refresh; 1,2,4,5 reuse -> 3 base invocations.
+        assert calls["n"] == 3
+
+    def test_refresh_every_one_disables_caching(self):
+        """``refresh_every=1`` recomputes on every call.
+
+        Locks: the documented no-caching setting. Catches an off-by-one that
+        would reuse the first result even when caching is meant to be off.
+        """
+        calls = {"n": 0}
+
+        class _Counting(KMeansAnchor):
+            def select(self, Q, key_padding_mask=None):
+                calls["n"] += 1
+                return super().select(Q, key_padding_mask=key_padding_mask)
+
+        cached = CachedAnchor(_Counting(4, iters=1), refresh_every=1)
+        q = torch.randn(2, 16, 8)
+        for _ in range(4):
+            cached.select(q)
+        assert calls["n"] == 4
+
+    def test_shape_change_invalidates_cache(self):
+        """A changed batch signature forces a refresh instead of reusing.
+
+        Locks: the cache is never applied to an incompatible batch. Catches a
+        stale ``(batch, m, dim)`` cache being returned for a different batch
+        size, which would broadcast wrong or raise downstream.
+        """
+        cached = CachedAnchor(KMeansAnchor(4, iters=1), refresh_every=8)
+        a1 = cached.select(torch.randn(2, 16, 8))
+        a2 = cached.select(torch.randn(5, 16, 8))  # different batch, same window
+        assert a1.shape[0] == 2 and a2.shape[0] == 5
+
+    def test_cached_anchors_stay_detached(self):
+        """Cached anchors carry no autograd state, so gradients still flow.
+
+        Locks: reuse does not smuggle a stale graph into a later step. Catches a
+        cache that retains ``requires_grad`` and would either error on reuse or
+        attach a previous step's graph to the current output.
+        """
+        cached = CachedAnchor(KMeansAnchor(4, iters=2), refresh_every=4)
+        attn = PiecewiseAttention(dim=8, scale=True, anchor_strategy=cached)
+        for _ in range(3):  # cross into the reuse region
+            q = torch.randn(2, 16, 8, requires_grad=True)
+            k = torch.randn(2, 16, 8, requires_grad=True)
+            v = torch.randn(2, 16, 8, requires_grad=True)
+            out, _ = attn(q, k, v)
+            out.sum().backward()
+            assert q.grad is not None and torch.isfinite(q.grad).all()
+
+    def test_rejects_bad_refresh(self):
+        """``refresh_every < 1`` is rejected at construction.
+
+        Locks: the guard on the cadence knob. Catches a zero/negative cadence
+        that would make the modulo logic ill-defined.
+        """
+        with pytest.raises(ValueError):
+            CachedAnchor(KMeansAnchor(4), refresh_every=0)
+
+    def test_threads_key_padding_mask(self):
+        """The mask reaches the base strategy, and a changed padding pattern
+        forces a refresh rather than reusing anchors built for other valid
+        positions.
+
+        Locks: cached anchors exclude padded queries exactly as a fresh
+        selection would. Catches (a) a wrapper that drops the mask when calling
+        the base strategy — reintroducing the padded-query leak fixed for every
+        other strategy — and (b) a signature that ignores the padding pattern and
+        serves a stale cache to a batch with a different valid length.
+        """
+        seen = {"mask": "unset"}
+
+        class _MaskRecording(KMeansAnchor):
+            def select(self, Q, key_padding_mask=None):
+                seen["mask"] = key_padding_mask
+                return super().select(Q, key_padding_mask=key_padding_mask)
+
+        cached = CachedAnchor(_MaskRecording(4, iters=1), refresh_every=8)
+        q = torch.randn(2, 16, 8)
+        mask = torch.ones(2, 16, dtype=torch.bool)
+        mask[:, 12:] = False  # last 4 positions padded
+
+        cached.select(q, key_padding_mask=mask)
+        assert seen["mask"] is mask  # mask threaded through, not dropped
+
+        # A different padding pattern (same shape/dtype/device) must refresh, not
+        # reuse the cache built for the previous valid length.
+        seen["mask"] = "unset"
+        mask2 = torch.ones(2, 16, dtype=torch.bool)
+        mask2[:, 8:] = False  # different valid count -> different anchors
+        cached.select(q, key_padding_mask=mask2)
+        assert seen["mask"] is mask2
+
+
 class TestMultiAnchorAttention:
     """Multi-anchor mode of PiecewiseAttention."""
 
@@ -181,7 +304,7 @@ class TestMultiAnchorAttention:
         "b,n,d,m,collapse",
         [
             (3, 40, 16, 4, False),  # ordinary routing -> batched capacity-bucket path
-            (1, 20, 4, 8, True),    # m>d + one dominant cluster -> skew-guard fallback
+            (1, 20, 4, 8, True),  # m>d + one dominant cluster -> skew-guard fallback
         ],
     )
     def test_fused_matches_gather_reference(self, b, n, d, m, collapse):
@@ -368,15 +491,11 @@ class TestMultiAnchorAttention:
         K = 2.0 * torch.randn(b, n, d)  # moderate peaking -> mid-size, uneven nuclei
         p = 0.9
 
-        attn = PiecewiseAttention(
-            dim=d, scale=True, anchor_strategy=StrideAnchor(m), build_topp=p
-        )
+        attn = PiecewiseAttention(dim=d, scale=True, anchor_strategy=StrideAnchor(m), build_topp=p)
         with torch.no_grad():
             anchors = attn.anchor_strategy.select(Q)
             scale = 1.0 / math.sqrt(d)
-            alpha = torch.softmax(
-                torch.einsum("bmd,bnd->bmn", anchors, K) * scale, dim=-1
-            )
+            alpha = torch.softmax(torch.einsum("bmd,bnd->bmn", anchors, K) * scale, dim=-1)
             wk, second_moment = attn._build_jacobian_factors_topp(alpha, V, K)
 
             # Independent ragged reference: each anchor sums over ONLY the smallest

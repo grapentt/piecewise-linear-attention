@@ -15,6 +15,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from .profiling import phase_timer
+
 if TYPE_CHECKING:
     from .anchors import AnchorStrategy
 
@@ -945,31 +947,36 @@ class PiecewiseAttention(BaseAttention):
         # (b, m, dim, dim) matrix, so the apply projects Δq through R before the matmul.
         reduced = self.build_reduced_d is not None
         R = None
-        if reduced:
-            # Reduced-rank build on the query-residual axis: M_j built only on the
-            # d′_j directions each cluster's Δq excites. weighted_k stays exact.
-            weighted_k = torch.einsum("bmn,bnd->bmd", alpha, K)  # (batch, m, dim)
-            R, second_moment, _dprime = self._build_jacobian_factors_reduced(
-                alpha, V, K, Q, anchors, assign, key_padding_mask=key_padding_mask
-            )  # R: (b, m, dim, d′_max), second_moment (M_red): (b, m, dim, d′_max)
-        elif self.build_topp is None:
-            # Exact dense build of the Jacobian factors.
-            weighted_k = torch.einsum("bmn,bnd->bmd", alpha, K)  # (batch, m, dim)
-            # M_j = Σ_n α_{jn} v_n k_nᵀ, formed with α folded directly into the
-            # contraction. The earlier "α ⊙ V" pre-scaling materialized a
-            # (batch, m, seq_len, dim) tensor — an m× fp32 blow-up of V (≈2 GB at
-            # batch=64, m=64, seq_len=2048, dim=64) written to and re-read from
-            # memory purely to carry the weights into the matmul. Since the build
-            # is memory-bandwidth-bound (not FLOP-bound), that intermediate, not
-            # the arithmetic, dominates. The three-operand einsum contracts α, V,
-            # K without ever forming it — bit-identical output, grads ~1e-6.
-            second_moment = torch.einsum("bmn,bnd,bne->bmde", alpha, V, K)  # (b, m, d, d)
-        else:
-            # Top-p (nucleus) truncated build: use only the smallest set of
-            # top-weighted keys per anchor whose cumulative softmax mass reaches
-            # build_topp. Shrinks the build's sequence axis from n to t ≪ n when
-            # α is peaked, and reverts to the full n (exact) when α is diffuse.
-            weighted_k, second_moment = self._build_jacobian_factors_topp(alpha, V, K)
+        # Time the Jacobian-factor build (dominated by the second-moment einsum on
+        # the dense path) when a profiler is installed; a no-op otherwise. This is
+        # the ``O(batch·m·n·d²)`` term whose share of the forward grows with m and
+        # d², the counterpart to the anchor-clustering phase timed in KMeansAnchor.
+        with phase_timer("second_moment_einsum"):
+            if reduced:
+                # Reduced-rank build on the query-residual axis: M_j built only on the
+                # d′_j directions each cluster's Δq excites. weighted_k stays exact.
+                weighted_k = torch.einsum("bmn,bnd->bmd", alpha, K)  # (batch, m, dim)
+                R, second_moment, _dprime = self._build_jacobian_factors_reduced(
+                    alpha, V, K, Q, anchors, assign, key_padding_mask=key_padding_mask
+                )  # R: (b, m, dim, d′_max), second_moment (M_red): (b, m, dim, d′_max)
+            elif self.build_topp is None:
+                # Exact dense build of the Jacobian factors.
+                weighted_k = torch.einsum("bmn,bnd->bmd", alpha, K)  # (batch, m, dim)
+                # M_j = Σ_n α_{jn} v_n k_nᵀ, formed with α folded directly into the
+                # contraction. The earlier "α ⊙ V" pre-scaling materialized a
+                # (batch, m, seq_len, dim) tensor — an m× fp32 blow-up of V (≈2 GB at
+                # batch=64, m=64, seq_len=2048, dim=64) written to and re-read from
+                # memory purely to carry the weights into the matmul. Since the build
+                # is memory-bandwidth-bound (not FLOP-bound), that intermediate, not
+                # the arithmetic, dominates. The three-operand einsum contracts α, V,
+                # K without ever forming it — bit-identical output, grads ~1e-6.
+                second_moment = torch.einsum("bmn,bnd,bne->bmde", alpha, V, K)  # (b, m, d, d)
+            else:
+                # Top-p (nucleus) truncated build: use only the smallest set of
+                # top-weighted keys per anchor whose cumulative softmax mass reaches
+                # build_topp. Shrinks the build's sequence axis from n to t ≪ n when
+                # α is peaked, and reverts to the full n (exact) when α is diffuse.
+                weighted_k, second_moment = self._build_jacobian_factors_topp(alpha, V, K)
 
         # Gather the m-free per-query factors along the anchor axis (cheap
         # O(seq_len · dim) gathers, never a (dim, dim) per-query object).

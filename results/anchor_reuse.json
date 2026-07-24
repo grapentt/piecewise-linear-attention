@@ -1,0 +1,81 @@
+{
+  "config": {
+    "batch_bh": 64,
+    "benchmark": "anchor_reuse",
+    "dim": 128,
+    "drift": 0.05,
+    "num_anchors": 4,
+    "purpose": "speedup and accuracy cost of anchor caching (CachedAnchor) and fewer Lloyd iters for piecewise_kmeans, over a drifting-input loop; accuracy is rel-err to exact softmax, penalty is vs fresh-every-step",
+    "refresh": [
+      4,
+      8,
+      16
+    ],
+    "seq_len": 2048,
+    "steps": 20
+  },
+  "environment": {
+    "device": "cpu",
+    "num_threads": 8,
+    "platform": "macOS-26.5.1-arm64-arm-64bit",
+    "torch": "2.10.0"
+  },
+  "history": {
+    "configs": {
+      "cached_iters3_refresh16": {
+        "mean_ms": 52.3945,
+        "mean_relerr_vs_softmax": 0.603803
+      },
+      "cached_iters3_refresh4": {
+        "mean_ms": 56.6205,
+        "mean_relerr_vs_softmax": 0.603789
+      },
+      "cached_iters3_refresh8": {
+        "mean_ms": 54.6318,
+        "mean_relerr_vs_softmax": 0.603842
+      },
+      "fresh_iters0": {
+        "mean_ms": 57.1813,
+        "mean_relerr_vs_softmax": 1.333639
+      },
+      "fresh_iters1": {
+        "mean_ms": 65.879,
+        "mean_relerr_vs_softmax": 0.604362
+      },
+      "fresh_iters3": {
+        "mean_ms": 76.8282,
+        "mean_relerr_vs_softmax": 0.603274
+      }
+    }
+  },
+  "metrics": {
+    "summary_vs_fresh": {
+      "cached_iters3_refresh16": {
+        "relerr_penalty_abs": 0.000529,
+        "relerr_penalty_pct": 0.088,
+        "speedup_vs_fresh": 1.466
+      },
+      "cached_iters3_refresh4": {
+        "relerr_penalty_abs": 0.000515,
+        "relerr_penalty_pct": 0.085,
+        "speedup_vs_fresh": 1.357
+      },
+      "cached_iters3_refresh8": {
+        "relerr_penalty_abs": 0.000568,
+        "relerr_penalty_pct": 0.094,
+        "speedup_vs_fresh": 1.406
+      },
+      "fresh_iters0": {
+        "relerr_penalty_abs": 0.730365,
+        "relerr_penalty_pct": 121.067,
+        "speedup_vs_fresh": 1.344
+      },
+      "fresh_iters1": {
+        "relerr_penalty_abs": 0.001088,
+        "relerr_penalty_pct": 0.18,
+        "speedup_vs_fresh": 1.166
+      }
+    }
+  },
+  "schema_version": 1
+}
