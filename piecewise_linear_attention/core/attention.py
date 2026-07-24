@@ -978,12 +978,35 @@ class PiecewiseAttention(BaseAttention):
                 # α is peaked, and reverts to the full n (exact) when α is diffuse.
                 weighted_k, second_moment = self._build_jacobian_factors_topp(alpha, V, K)
 
-        # Gather the m-free per-query factors along the anchor axis (cheap
-        # O(seq_len · dim) gathers, never a (dim, dim) per-query object).
+        # Select each query's per-anchor factors along the anchor axis (the
+        # m-free (batch, seq_len, dim) selects, never a (dim, dim) per-query
+        # object). The selection collapses n query positions onto m ≪ n anchor
+        # slots, so its *backward* accumulates n gradient rows into m slots.
+        #
+        # ``torch.gather`` implements that backward as ``scatter_add_`` — atomic
+        # adds with n→m collision. On the A100 that atomic path is a bf16
+        # slow-path: at seq_len=2000, m=4 it measured ~60× slower than the
+        # equivalent dense form in bf16 (and ~76× slower than its own fp32),
+        # and dominated the multi-anchor training backward (≈87% of CUDA time).
+        # The algebraically identical ``onehot(assign) @ factor`` has a dense
+        # ``bmm`` backward (a segment-sum, no atomics) that avoids it entirely.
+        #
+        # In fp32 the gather backward is already cheap and the one-hot ``bmm``
+        # is marginally slower, so the reformulation is gated to the reduced-
+        # precision dtypes (bf16/fp16) where the atomic slow-path actually bites.
         idx_d = assign.unsqueeze(-1).expand(-1, -1, dim)  # (batch, seq_len, dim)
-        a_sel = torch.gather(anchors, 1, idx_d)  # (batch, seq_len, dim)
-        o_sel = torch.gather(out_anchor, 1, idx_d)  # (batch, seq_len, dim)
-        wk_sel = torch.gather(weighted_k, 1, idx_d)  # (batch, seq_len, dim)
+        if Q.dtype in (torch.bfloat16, torch.float16):
+            # onehot: (batch, seq_len, m); backward of ``onehot @ factor`` w.r.t.
+            # factor is ``onehotᵀ @ grad`` — one batched matmul, no atomic scatter.
+            onehot = torch.zeros(b, n, m, device=Q.device, dtype=Q.dtype)
+            onehot.scatter_(2, assign.unsqueeze(-1), 1.0)
+            a_sel = torch.bmm(onehot, anchors)  # (batch, seq_len, dim)
+            o_sel = torch.bmm(onehot, out_anchor)  # (batch, seq_len, dim)
+            wk_sel = torch.bmm(onehot, weighted_k)  # (batch, seq_len, dim)
+        else:
+            a_sel = torch.gather(anchors, 1, idx_d)  # (batch, seq_len, dim)
+            o_sel = torch.gather(out_anchor, 1, idx_d)  # (batch, seq_len, dim)
+            wk_sel = torch.gather(weighted_k, 1, idx_d)  # (batch, seq_len, dim)
         delta = Q - a_sel  # (batch, seq_len, dim)
 
         # Group-by-anchor apply of M_j @ Δq. Route each query's Δq into a
