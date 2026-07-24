@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "config": {
+    "benchmark": "listops_warmup_backward_attribution",
+    "purpose": "localize the piecewise_kmeans m=4 first-few-epochs slowdown on LRA ListOps (A100, bf16, seq 2000): the decay is a bf16 backward cost dominated by scatter_add_ (the backward of the per-query anchor gathers), not clustering, the second-moment einsum, data page-cache, allocator growth, or k-means convergence",
+    "method": "piecewise_kmeans",
+    "num_anchors": 4,
+    "kmeans_iters": 3,
+    "precision": "bf16",
+    "max_length": 2000,
+    "batch_size": 32
+  },
+  "metrics": {
+    "init_forward_ms": 324.4,
+    "init_forward_plus_backward_ms": 4151.2,
+    "init_backward_ms": 3826.8,
+    "init_forward_clustering_ms": 133.1,
+    "init_forward_einsum_ms": 24.5,
+    "init_fwdbwd_bf16_ms": 4078.4,
+    "init_fwdbwd_fp32_ms": 1586.3,
+    "bf16_over_fp32_ratio": 2.57,
+    "backward_scatter_add_cuda_frac": 0.868
+  },
+  "environment": {
+    "gpu": "NVIDIA A100 80GB PCIe",
+    "torch": "2.1.2+cu121",
+    "device": "cuda"
+  },
+  "history": {
+    "per_epoch_compute_seconds_from_prior_uninstrumented_run": {
+      "note": "results/lra/listops/results.json (10-epoch bf16 run). compute_time per epoch; data_time flat ~1.3s throughout; all other methods flat across epochs.",
+      "piecewise_kmeans_m4": [2590.7, 1291.2, 1097.5, 800.1, 829.8, 745.5, 765.6, 737.3, 736.5, 735.1],
+      "piecewise_m1": [239.1, 239.0, 239.1, 239.1, 238.7, 238.5, 238.7, 239.1, 239.0, 238.7],
+      "standard": [1221.4, 1218.3, 1210.5, 1208.9, 1208.4, 1209.1, 1209.1, 1208.8, 1209.9, 1208.6]
+    },
+    "fixed_batch_fwdbwd_ms_by_training_step": {
+      "note": "same batch timed at increasing training steps; the cost does NOT drop within epoch 1 (it rises to step 300), so the epoch-scale recovery (2590->1293 s at epoch 1->2) is a multi-epoch effect, not an early-training transient",
+      "step_0": 4191.4,
+      "step_100": 4801.5,
+      "step_300": 6104.4
+    },
+    "attention_sharpness_control": {
+      "note": "scaling q_proj weights x1/4/16 to sharpen attention alpha does NOT reduce fwd+bwd -> refutes attention-entropy as the decay driver",
+      "qscale_1x_ms": 5286.5,
+      "qscale_4x_ms": 5468.9,
+      "qscale_16x_ms": 5486.4
+    },
+    "profiler_top_cuda_ops_bf16_fwdbwd_at_init": [
+      {"op": "aten::scatter_add_", "self_cuda_frac": 0.868, "role": "backward of torch.gather (anchor selection); atomic-add high-collision (2048 positions -> 4 anchor slots)"},
+      {"op": "aten::gather_backward / GatherBackward0", "cuda_total_ms": 4516, "calls": 12},
+      {"op": "aten::bmm", "self_cuda_ms": 164, "calls": 84},
+      {"op": "aten::cdist (k-means Lloyd)", "self_cuda_ms": 139, "calls": 16}
+    ]
+  }
+}

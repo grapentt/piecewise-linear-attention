@@ -177,40 +177,47 @@ the clustering. Caching is a real CPU-side and low-`m` training-throughput win
 (and on CPU at `n≥1024` `m=4` is already *faster* than dense softmax, which
 caching widens), but the `d²` lever below is what the high-`m`/GPU regime needs.
 
-### The first-few-epochs slowdown is system warmup, not k-means "converging"
+### The first-few-epochs slowdown is a bf16 backward cost, not clustering or the einsum
 
-An `m=4` ListOps run was observed to fall from ~43 min in epoch 1 to ~13 min by
-epoch 4. The intuitive reading — "k-means converges across epochs, so clustering
-gets cheaper" — does not hold: `KMeansAnchor` is **stateless per forward** (a fixed
-number of Lloyd iterations from a deterministic per-batch init, no memory carried
-across steps or epochs), sequences are padded to a fixed length, and the trainer
-runs with `cudnn.benchmark = False`. The clustering compute per step is therefore
-flat epoch-to-epoch and *cannot* self-accelerate. The ~43 min is the **warmup
-epoch**; the steady-state `m=4` cost is ~13 min/epoch (≈3.9 it/s), and that is the
-number the method should be quoted at — the first epoch pays one-time costs that
-amortize over the run.
+An `m=4` ListOps run (A100, bf16, seq 2000) falls from ~43 min in epoch 1 to
+~13 min by epoch ~6, then holds flat. Two intuitive readings are both wrong, and
+the measured cause is neither the clustering nor the second-moment einsum that the
+CPU op-level profiling above had flagged.
 
-The remaining warmup candidates are all system-level and orthogonal to the anchor
-math: dataset first-touch / OS page-cache (a one-time cost on the data side), CUDA
-caching-allocator growth (the pool grows with `cudaMalloc` in epoch 1 then is
-reused), and cuBLAS / kernel lazy first-touch (a one-time per-kernel load paid in
-the first iterations). Because caching amortizes *clustering* while warmup is a
-*system* effect, the caching win above is independent of this speedup — they stack
-rather than explaining each other.
+**What it is not.** The per-epoch data-vs-compute split from the real run shows the
+decay is entirely in `compute_time`; `data_time` is flat (~1.3 s/epoch), so it is
+not dataset first-touch / page-cache. It is a smooth **multi-epoch** decay
+(2590→1293→1099→802→…→737 s), not a one-time epoch-1 spike, which rules out the
+one-time system-warmup costs (CUDA allocator growth, cuBLAS/kernel lazy
+first-touch). And `KMeansAnchor` is stateless per forward (fixed Lloyd iterations,
+deterministic per-batch init, no cross-step memory) with `cudnn.benchmark = False`,
+so "k-means converges across epochs" cannot make its compute cheaper. Every other
+method — including `m=1` piecewise — is dead flat across epochs; only the k-means
+multi-anchor path decays.
 
-`benchmarks/harness/run_epoch_warmup_diag.py` isolates these on GPU. It reuses the
-real `train_epoch` loop (no forked training path) and, via the native phase timer
-(`piecewise_linear_attention/core/profiling.py`, a near-zero-cost opt-in the
-model's own clustering and second-moment einsum push into when a probe is
-installed), reports per epoch: the data-vs-compute split, the clustering and einsum
-phase totals, the CUDA allocator trajectory, and a per-iteration "microscope" over
-the first epoch's steps — plus the same breakdown for `m=1`, fresh `m=4`, and
-cached `m=4`. The decisive signatures: a flat clustering phase across epochs
-refutes the convergence story; an epoch-1 spike confined to the data time
-implicates page-cache; a large first-iteration cost in the microscope implicates
-cuBLAS first-touch. The steady-state clustering-vs-einsum split it emits also says
-which lever makes the shape competitive — caching if clustering-bound, the `d²`
-low-rank build if einsum-bound.
+**What it is.** Timing a fixed batch (so the timing reflects model state, not data)
+at random init: the forward is 324 ms but forward+backward is 4151 ms — the
+**backward is ~3.8 s, ~12× the forward**, and the forward phase timer shows
+clustering (133 ms) and the einsum (24 ms) are both negligible. A `torch.profiler`
+trace of that backward is unambiguous: **`aten::scatter_add_` is 87 % of CUDA
+time**, invoked as the backward of the per-query anchor gathers in
+`_compute_multi_anchor` (`torch.gather(anchors / out_anchor / weighted_k, 1,
+idx_d)`). `gather`'s backward is a `scatter_add_`, which on GPU uses atomic adds;
+scattering 2048 query positions into 4 anchor slots per feature column is a
+high-collision atomic pattern, and in bf16 it hits a slow path — the same step in
+fp32 is 2.6× faster (1586 ms vs 4078 ms at init). The cost decays as training
+proceeds (still slow at step 100, recovering only across epochs), so it tracks the
+bf16 gradient distribution entering those atomics rather than the FLOP count.
+
+**Consequence for making `m>1` competitive.** The lever is the **gather/scatter in
+the multi-anchor apply backward**, not the einsum — so the `d²` low-rank build
+(issue #9) is orthogonal to this particular cost. The direct fixes are to run the
+piecewise apply in fp32, to replace the gather-from-`m`-anchors with an
+`index_select` / one-hot formulation whose backward avoids the high-collision
+atomic scatter, or to supply a hand-written backward. `run_epoch_warmup_diag.py`
+(reusing the real `train_epoch` loop, with the native near-zero-cost phase timer in
+`piecewise_linear_attention/core/profiling.py`) reproduces the per-epoch split, and
+the fixed-batch forward/backward probe localizes the cost to the scatter_add above.
 
 
 
