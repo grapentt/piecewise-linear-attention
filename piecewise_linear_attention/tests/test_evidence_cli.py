@@ -93,3 +93,22 @@ class TestEvidenceCLISmoke:
         assert out.exists()
         assert result.history["configs"], "no measurements recorded"
         assert result.metrics["summary_vs_fresh"], "no reuse summary recorded"
+
+    def test_epoch_warmup_diag_smoke(self, tmp_path):
+        """run_epoch_warmup_diag --smoke completes and writes a well-formed result.
+
+        Locks: the epoch-warmup diagnostic pipeline (synthetic loader -> real
+        train_epoch under a phase probe -> per-epoch clustering/einsum split +
+        per-iteration microscope -> summary -> result schema). Catches a break in
+        the native phase instrumentation wiring or a rename of the phases the
+        summary cites. Skips cleanly where the LRA trainer is absent (the
+        diagnostic returns None), since the smoke path drives the real model/loop.
+        """
+        module = _load("_run_epoch_warmup_diag_cli", "run_epoch_warmup_diag.py")
+        out = tmp_path / "epoch_warmup_diag.json"
+        result = module.main(["--smoke", "--out", str(out)])
+        if result is None:
+            pytest.skip("LRA ListOps trainer not present in this checkout")
+        assert out.exists()
+        assert result.metrics["summaries"], "no method summaries recorded"
+        assert result.history["per_method"], "no per-method traces recorded"

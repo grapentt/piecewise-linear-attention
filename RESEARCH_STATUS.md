@@ -177,6 +177,41 @@ the clustering. Caching is a real CPU-side and low-`m` training-throughput win
 (and on CPU at `n≥1024` `m=4` is already *faster* than dense softmax, which
 caching widens), but the `d²` lever below is what the high-`m`/GPU regime needs.
 
+### The first-few-epochs slowdown is system warmup, not k-means "converging"
+
+An `m=4` ListOps run was observed to fall from ~43 min in epoch 1 to ~13 min by
+epoch 4. The intuitive reading — "k-means converges across epochs, so clustering
+gets cheaper" — does not hold: `KMeansAnchor` is **stateless per forward** (a fixed
+number of Lloyd iterations from a deterministic per-batch init, no memory carried
+across steps or epochs), sequences are padded to a fixed length, and the trainer
+runs with `cudnn.benchmark = False`. The clustering compute per step is therefore
+flat epoch-to-epoch and *cannot* self-accelerate. The ~43 min is the **warmup
+epoch**; the steady-state `m=4` cost is ~13 min/epoch (≈3.9 it/s), and that is the
+number the method should be quoted at — the first epoch pays one-time costs that
+amortize over the run.
+
+The remaining warmup candidates are all system-level and orthogonal to the anchor
+math: dataset first-touch / OS page-cache (a one-time cost on the data side), CUDA
+caching-allocator growth (the pool grows with `cudaMalloc` in epoch 1 then is
+reused), and cuBLAS / kernel lazy first-touch (a one-time per-kernel load paid in
+the first iterations). Because caching amortizes *clustering* while warmup is a
+*system* effect, the caching win above is independent of this speedup — they stack
+rather than explaining each other.
+
+`benchmarks/harness/run_epoch_warmup_diag.py` isolates these on GPU. It reuses the
+real `train_epoch` loop (no forked training path) and, via the native phase timer
+(`piecewise_linear_attention/core/profiling.py`, a near-zero-cost opt-in the
+model's own clustering and second-moment einsum push into when a probe is
+installed), reports per epoch: the data-vs-compute split, the clustering and einsum
+phase totals, the CUDA allocator trajectory, and a per-iteration "microscope" over
+the first epoch's steps — plus the same breakdown for `m=1`, fresh `m=4`, and
+cached `m=4`. The decisive signatures: a flat clustering phase across epochs
+refutes the convergence story; an epoch-1 spike confined to the data time
+implicates page-cache; a large first-iteration cost in the microscope implicates
+cuBLAS first-touch. The steady-state clustering-vs-einsum split it emits also says
+which lever makes the shape competitive — caching if clustering-bound, the `d²`
+low-rank build if einsum-bound.
+
 
 
 Relative error to exact softmax, on two input regimes that give **opposite**

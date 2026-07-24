@@ -31,6 +31,12 @@ python harness/run_multianchor_profile.py --dims 64 128 --lengths 512 1024 2048 
 # Anchor-reuse speedup vs accuracy cost over a drifting-input loop -> results/anchor_reuse.json
 python harness/run_anchor_reuse.py --out ../results/anchor_reuse.json
 
+# Epoch-warmup diagnostic on LRA ListOps (needs experiments/lra + a GPU for the real run;
+# --smoke self-tests the pipeline on CPU in seconds) -> results/lra/listops/epoch_warmup_diag.json
+python harness/run_epoch_warmup_diag.py --device cuda --epochs 4 \
+    --methods piecewise piecewise_kmeans_m4 piecewise_kmeans_m4_cached8 \
+    --precision bf16 --out ../results/lra/listops/epoch_warmup_diag.json
+
 # Two-panel speed-vs-quality figure from the JSON above (PNG is not committed)
 python harness/plot_results.py --out ../results/speed_vs_quality.png
 ```
@@ -43,6 +49,7 @@ Methods compared: `standard`, `linear`, `performer`, `piecewise` (single mean an
 - **Anchor-count cost** (`anchor_cost_sweep.json`): the apply is `O(batch·m·n·d²)`, linear in anchor count `m`. At `d=64–128` the single anchor is ~3–5× faster than Performer, but `m=16` is ~3–5× slower and `m=64` is 9–44× slower — so the speed advantage is specific to `m=1`.
 - **Where the `m>1` time goes** (`multianchor_profile.json`): op-level attribution at the sweep shapes. The dominant term shifts with `m` — the recomputed k-means Lloyd loop is the largest single term at `m=4` (~30%), while the `O(m·n·d²)` second-moment einsum overtakes it at `m=16` (~40%). The fp32 cast is negligible on CPU.
 - **Anchor reuse** (`anchor_reuse.json`): caching the detached centroids (`anchor_refresh_every>1`) recovers the clustering term — ~1.4× forward speedup at `m=4` for a +0.09% fidelity cost — but not the einsum, so it helps at low `m`, not high `m`.
+- **Epoch-warmup diagnostic** (`epoch_warmup_diag.json`): on the real LRA ListOps loop, splits each epoch into data / clustering / einsum / other-compute (via a near-zero-cost native phase timer), tracks the CUDA allocator, and runs a per-iteration microscope over the first epoch. Separates the first-few-epochs slowdown into system warmup (page-cache, allocator growth, cuBLAS first-touch) from the *flat* clustering phase — the evidence that the epoch-over-epoch speedup is not k-means "converging" — and compares fresh vs cached anchors epoch-by-epoch.
 - **Approximation quality on synthetic inputs** (`microbench.json`): centroid anchors (mean, k-means) track softmax more closely than positional (stride), linear, or Performer.
 - **Fidelity on real activations** (`real_activation_fidelity.json`): on `Q/K/V` captured from pretrained encoders, anchor count is a real accuracy lever — `m=64` cuts relative error ~3× versus `m=1` and is the only piecewise config that beats Nyströmformer at `n=8192`, while `m=1` alone is insufficient there. Opposite to the single-cluster synthetic microbenchmark.
 - **Recall** (`recall.json`): the mean anchor solves the task (~0.995, 8 seeds); linear attention fails at chance.

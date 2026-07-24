@@ -22,6 +22,8 @@ from typing import Callable, Optional, Tuple
 
 import torch
 
+from .profiling import phase_timer
+
 
 class AnchorStrategy(ABC):
     """Base class for anchor-selection strategies.
@@ -165,7 +167,7 @@ class KMeansAnchor(AnchorStrategy):
     ) -> torch.Tensor:
         batch, seq_len, dim = Q.shape
         k = min(self.num_anchors, seq_len)
-        with torch.no_grad():
+        with phase_timer("anchor_clustering"), torch.no_grad():
             # Lloyd's algorithm is run in float32: cdist has no half-precision
             # kernel on some backends and scatter/division accumulate error in
             # fp16. The selected anchors are cast back to the input dtype.
