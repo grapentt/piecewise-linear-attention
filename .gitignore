@@ -137,9 +137,19 @@ dmypy.json
 *.ckpt
 *.safetensors
 data/
+# But keep source code under experiments/*/data/ (loaders/generators, not datasets)
+!experiments/*/data/
 checkpoints/
 outputs/
 wandb/
+
+# MLflow experiment tracking (optional --mlflow store/artifacts)
+mlruns/
+mlflow.db
+mlflow.db-journal
+mlflow.db-wal
+mlflow.db-shm
+mlartifacts/
 
 # Benchmark results
 benchmark_results/

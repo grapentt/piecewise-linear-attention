@@ -45,6 +45,9 @@ experiments = [
     "transformers>=4.30.0",  # For tokenizers
     "datasets>=2.14.0",  # HuggingFace datasets (duplicate but clear)
 ]
+tracking = [
+    "mlflow>=2.0.0",  # Optional experiment tracking for the LRA trainer (--mlflow)
+]
 docs = [
     "sphinx>=5.0.0",
     "sphinx-rtd-theme>=1.2.0",
