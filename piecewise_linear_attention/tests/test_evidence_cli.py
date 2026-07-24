@@ -65,3 +65,31 @@ class TestEvidenceCLISmoke:
         assert out.exists()
         assert result.history["grid"], "no measurements recorded"
         assert result.metrics["speedup_vs_performer"], "no performer speedup recorded"
+
+    def test_multianchor_profile_smoke(self, tmp_path):
+        """run_multianchor_profile --smoke completes and writes a well-formed result.
+
+        Locks: the op-level attribution pipeline (isolated-op timing + profiler
+        self-time -> attribution metric -> result schema). Catches a break in the
+        per-op decomposition or a rename of the ops the verdict cites.
+        """
+        module = _load("_run_multianchor_profile_cli", "run_multianchor_profile.py")
+        out = tmp_path / "multianchor_profile.json"
+        result = module.main(["--smoke", "--out", str(out)])
+        assert out.exists()
+        assert result.history["grid"], "no measurements recorded"
+        assert result.metrics["attribution"], "no attribution recorded"
+
+    def test_anchor_reuse_smoke(self, tmp_path):
+        """run_anchor_reuse --smoke completes and writes a well-formed result.
+
+        Locks: the reuse speed/accuracy pipeline (drifting-input loop -> cached
+        vs fresh comparison -> result schema). Catches a break in the
+        CachedAnchor wiring or the speedup/penalty summary.
+        """
+        module = _load("_run_anchor_reuse_cli", "run_anchor_reuse.py")
+        out = tmp_path / "anchor_reuse.json"
+        result = module.main(["--smoke", "--out", str(out)])
+        assert out.exists()
+        assert result.history["configs"], "no measurements recorded"
+        assert result.metrics["summary_vs_fresh"], "no reuse summary recorded"

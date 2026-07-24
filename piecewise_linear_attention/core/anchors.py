@@ -18,7 +18,7 @@ regardless of how the anchors ``a`` were chosen.
 """
 
 from abc import ABC, abstractmethod
-from typing import Callable, Optional
+from typing import Callable, Optional, Tuple
 
 import torch
 
@@ -221,6 +221,84 @@ class KMeansAnchor(AnchorStrategy):
         return centroids.to(Q.dtype).detach()  # (batch, k, dim)
 
 
+class CachedAnchor(AnchorStrategy):
+    """Amortize a base strategy's anchor selection across consecutive forwards.
+
+    Anchor selection (notably :class:`KMeansAnchor`'s Lloyd loop) is recomputed
+    on every forward pass, and op-level CPU profiling shows that at low anchor
+    count this *clustering* — not the ``O(batch·m·n·d²)`` second-moment einsum —
+    is the single largest term in the multi-anchor forward (~30 % at ``m=4``).
+    Because the base strategy runs under ``torch.no_grad()`` and returns detached
+    centroids, the anchors carry no autograd state and can be reused across steps
+    without affecting the gradients that flow through ``A(a) + J(a) @ (q − a)``.
+
+    This wrapper computes the base strategy's anchors on the first call and every
+    ``refresh_every`` calls thereafter, returning the cached (detached) anchors in
+    between. When the input's batch size, sequence length, dtype or device changes
+    between calls the cache is invalidated and the base strategy is re-run, so a
+    stale cache is never applied to an incompatible batch.
+
+    The reuse is a *speed/accuracy* trade: stale centroids drift from the ones a
+    fresh clustering would produce as the queries change across steps. Measured
+    against exact softmax, the fidelity penalty of reuse is small (the anchors
+    only choose where the first-order expansion is centered, and both fresh and
+    stale centroids are comparably-good centers), but it is not zero, so the
+    refresh cadence is exposed as a knob.
+
+    Parameters
+    ----------
+    base:
+        The wrapped strategy whose ``select`` produces the anchors to cache.
+    refresh_every:
+        Recompute the base anchors on call ``0`` and every ``refresh_every``
+        calls after that; reuse the cache on the intervening calls. ``1`` recomputes
+        every call (no caching); must be ``>= 1``.
+    """
+
+    def __init__(self, base: AnchorStrategy, refresh_every: int = 8):
+        if refresh_every < 1:
+            raise ValueError(f"refresh_every must be >= 1, got {refresh_every}")
+        self.base = base
+        self.num_anchors = getattr(base, "num_anchors", 1)
+        self.refresh_every = refresh_every
+        self._cache: Optional[torch.Tensor] = None
+        self._calls = 0
+        # Signature of the batch the cache was built for; a change forces refresh.
+        self._sig: Optional[Tuple] = None
+
+    def _signature(self, Q: torch.Tensor, key_padding_mask: Optional[torch.Tensor]) -> tuple:
+        # Fold the padding pattern into the signature: a batch with a different set
+        # of valid query positions produces different anchors, so it must not reuse
+        # a cache built for another pattern. The encoder pads as a tail suffix
+        # (valid prefix, True=valid), so the per-sample valid *count* determines the
+        # pattern exactly — cheaper than hashing the full mask, and collision-free
+        # under that suffix-padding invariant.
+        if key_padding_mask is None:
+            mask_sig: Tuple = (None,)
+        else:
+            counts = key_padding_mask.sum(dim=1).detach().cpu().tolist()
+            mask_sig = tuple(counts)
+        return (Q.shape[0], Q.shape[1], Q.shape[2], Q.dtype, Q.device, mask_sig)
+
+    def select(
+        self, Q: torch.Tensor, key_padding_mask: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
+        sig = self._signature(Q, key_padding_mask)
+        stale = self._calls % self.refresh_every != 0
+        if self._cache is not None and stale and sig == self._sig:
+            self._calls += 1
+            return self._cache
+        # Refresh: recompute the base anchors and reset the reuse counter so the
+        # next ``refresh_every - 1`` calls reuse this result. The mask is threaded
+        # through so cached centroids exclude padded queries exactly as a fresh
+        # selection would.
+        anchors = self.base.select(Q, key_padding_mask=key_padding_mask).detach()
+        self._cache = anchors
+        self._sig = sig
+        self._calls = 1
+        return anchors
+
+
 class CallableAnchor(AnchorStrategy):
     """Adapter wrapping a legacy ``pseudo_query_fn`` as a single-anchor strategy.
 
@@ -261,5 +339,6 @@ __all__ = [
     "FirstAnchor",
     "StrideAnchor",
     "KMeansAnchor",
+    "CachedAnchor",
     "CallableAnchor",
 ]

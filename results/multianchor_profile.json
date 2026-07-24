@@ -1,0 +1,1491 @@
+{
+  "config": {
+    "anchors": [
+      1,
+      4,
+      16
+    ],
+    "batch_bh": 64,
+    "benchmark": "multianchor_profile",
+    "dims": [
+      64,
+      128
+    ],
+    "kmeans_iters": 3,
+    "lengths": [
+      512,
+      1024,
+      2048
+    ],
+    "purpose": "op-level CPU attribution of the piecewise_kmeans (m>1) forward: splits wall-clock across the recomputed k-means Lloyd loop, the O(b*m*n*d^2) second-moment einsum, the nearest-anchor cdist, and the fp32 cast, at the shapes of results/anchor_cost_sweep.json",
+    "repeats": 12,
+    "warmup": 3
+  },
+  "environment": {
+    "device": "cpu",
+    "num_threads": 8,
+    "platform": "macOS-26.5.1-arm64-arm-64bit",
+    "torch": "2.10.0"
+  },
+  "history": {
+    "grid": [
+      {
+        "dim": 64,
+        "isolated_ops_ms": {},
+        "num_anchors": 1,
+        "profiler_self_ms": [
+          {
+            "count": 6,
+            "op": "aten::bmm",
+            "self_ms": 1.9326
+          },
+          {
+            "count": 1152,
+            "op": "aten::select",
+            "self_ms": 0.4143
+          },
+          {
+            "count": 3,
+            "op": "aten::mul",
+            "self_ms": 0.226
+          },
+          {
+            "count": 1,
+            "op": "aten::add",
+            "self_ms": 0.2074
+          },
+          {
+            "count": 2,
+            "op": "aten::sub",
+            "self_ms": 0.1991
+          },
+          {
+            "count": 1,
+            "op": "aten::sum",
+            "self_ms": 0.1614
+          },
+          {
+            "count": 1179,
+            "op": "aten::as_strided",
+            "self_ms": 0.121
+          },
+          {
+            "count": 1,
+            "op": "aten::_softmax",
+            "self_ms": 0.0451
+          },
+          {
+            "count": 6,
+            "op": "aten::matmul",
+            "self_ms": 0.0257
+          },
+          {
+            "count": 908,
+            "op": "aten::resolve_conj",
+            "self_ms": 0.0246
+          },
+          {
+            "count": 1,
+            "op": "aten::div_",
+            "self_ms": 0.0242
+          },
+          {
+            "count": 8,
+            "op": "aten::unsqueeze",
+            "self_ms": 0.0177
+          }
+        ],
+        "seq_len": 512,
+        "wall_ms": {
+          "piecewise": 1.7525,
+          "standard": 8.9164
+        }
+      },
+      {
+        "dim": 64,
+        "isolated_ops_ms": {
+          "assign_cdist": 0.8713,
+          "fp32_cast": 0.0002,
+          "kmeans_cdist_iter": 0.7331,
+          "kmeans_lloyd": 3.9575,
+          "scores_softmax": 0.3361,
+          "second_moment": 2.4382
+        },
+        "num_anchors": 4,
+        "profiler_self_ms": [
+          {
+            "count": 10,
+            "op": "aten::bmm",
+            "self_ms": 5.1435
+          },
+          {
+            "count": 6,
+            "op": "aten::scatter_add_",
+            "self_ms": 1.1218
+          },
+          {
+            "count": 5,
+            "op": "aten::gather",
+            "self_ms": 1.1136
+          },
+          {
+            "count": 8,
+            "op": "aten::cat",
+            "self_ms": 0.9182
+          },
+          {
+            "count": 2304,
+            "op": "aten::select",
+            "self_ms": 0.8809
+          },
+          {
+            "count": 9,
+            "op": "aten::mul",
+            "self_ms": 0.6499
+          },
+          {
+            "count": 15,
+            "op": "aten::copy_",
+            "self_ms": 0.4915
+          },
+          {
+            "count": 4,
+            "op": "aten::argmin",
+            "self_ms": 0.4619
+          },
+          {
+            "count": 1,
+            "op": "aten::sort",
+            "self_ms": 0.4111
+          },
+          {
+            "count": 8,
+            "op": "aten::pow",
+            "self_ms": 0.3254
+          },
+          {
+            "count": 8,
+            "op": "aten::sum",
+            "self_ms": 0.3213
+          },
+          {
+            "count": 2404,
+            "op": "aten::as_strided",
+            "self_ms": 0.2866
+          }
+        ],
+        "seq_len": 512,
+        "wall_ms": {
+          "piecewise": 12.7275,
+          "standard": 8.9164
+        }
+      },
+      {
+        "dim": 64,
+        "isolated_ops_ms": {
+          "assign_cdist": 1.0682,
+          "fp32_cast": 0.0002,
+          "kmeans_cdist_iter": 0.8955,
+          "kmeans_lloyd": 4.5567,
+          "scores_softmax": 0.3877,
+          "second_moment": 8.4633
+        },
+        "num_anchors": 16,
+        "profiler_self_ms": [
+          {
+            "count": 10,
+            "op": "aten::bmm",
+            "self_ms": 11.2622
+          },
+          {
+            "count": 15,
+            "op": "aten::copy_",
+            "self_ms": 1.8297
+          },
+          {
+            "count": 4608,
+            "op": "aten::select",
+            "self_ms": 1.8142
+          },
+          {
+            "count": 8,
+            "op": "aten::cat",
+            "self_ms": 1.089
+          },
+          {
+            "count": 9,
+            "op": "aten::mul",
+            "self_ms": 1.0681
+          },
+          {
+            "count": 6,
+            "op": "aten::scatter_add_",
+            "self_ms": 1.038
+          },
+          {
+            "count": 5,
+            "op": "aten::gather",
+            "self_ms": 1.0327
+          },
+          {
+            "count": 4,
+            "op": "aten::argmin",
+            "self_ms": 0.7313
+          },
+          {
+            "count": 1,
+            "op": "aten::sort",
+            "self_ms": 0.5559
+          },
+          {
+            "count": 4720,
+            "op": "aten::as_strided",
+            "self_ms": 0.4989
+          },
+          {
+            "count": 8,
+            "op": "aten::pow",
+            "self_ms": 0.443
+          },
+          {
+            "count": 8,
+            "op": "aten::sum",
+            "self_ms": 0.3967
+          }
+        ],
+        "seq_len": 512,
+        "wall_ms": {
+          "piecewise": 22.4054,
+          "standard": 8.9164
+        }
+      },
+      {
+        "dim": 64,
+        "isolated_ops_ms": {},
+        "num_anchors": 1,
+        "profiler_self_ms": [
+          {
+            "count": 6,
+            "op": "aten::bmm",
+            "self_ms": 2.5286
+          },
+          {
+            "count": 1152,
+            "op": "aten::select",
+            "self_ms": 0.3889
+          },
+          {
+            "count": 3,
+            "op": "aten::mul",
+            "self_ms": 0.2487
+          },
+          {
+            "count": 1,
+            "op": "aten::sum",
+            "self_ms": 0.2414
+          },
+          {
+            "count": 2,
+            "op": "aten::sub",
+            "self_ms": 0.1774
+          },
+          {
+            "count": 1,
+            "op": "aten::add",
+            "self_ms": 0.1717
+          },
+          {
+            "count": 1179,
+            "op": "aten::as_strided",
+            "self_ms": 0.1396
+          },
+          {
+            "count": 1,
+            "op": "aten::_softmax",
+            "self_ms": 0.0508
+          },
+          {
+            "count": 908,
+            "op": "aten::resolve_conj",
+            "self_ms": 0.0228
+          },
+          {
+            "count": 6,
+            "op": "aten::matmul",
+            "self_ms": 0.0191
+          },
+          {
+            "count": 8,
+            "op": "aten::unsqueeze",
+            "self_ms": 0.0105
+          },
+          {
+            "count": 12,
+            "op": "aten::expand",
+            "self_ms": 0.0103
+          }
+        ],
+        "seq_len": 1024,
+        "wall_ms": {
+          "piecewise": 3.4255,
+          "standard": 34.4955
+        }
+      },
+      {
+        "dim": 64,
+        "isolated_ops_ms": {
+          "assign_cdist": 1.663,
+          "fp32_cast": 0.0001,
+          "kmeans_cdist_iter": 1.5521,
+          "kmeans_lloyd": 7.3945,
+          "scores_softmax": 0.559,
+          "second_moment": 5.1079
+        },
+        "num_anchors": 4,
+        "profiler_self_ms": [
+          {
+            "count": 10,
+            "op": "aten::bmm",
+            "self_ms": 9.2512
+          },
+          {
+            "count": 6,
+            "op": "aten::scatter_add_",
+            "self_ms": 2.3302
+          },
+          {
+            "count": 5,
+            "op": "aten::gather",
+            "self_ms": 1.9652
+          },
+          {
+            "count": 8,
+            "op": "aten::cat",
+            "self_ms": 1.5891
+          },
+          {
+            "count": 15,
+            "op": "aten::copy_",
+            "self_ms": 1.558
+          },
+          {
+            "count": 9,
+            "op": "aten::mul",
+            "self_ms": 1.1606
+          },
+          {
+            "count": 2304,
+            "op": "aten::select",
+            "self_ms": 0.9134
+          },
+          {
+            "count": 2,
+            "op": "aten::scatter_",
+            "self_ms": 0.7953
+          },
+          {
+            "count": 4,
+            "op": "aten::argmin",
+            "self_ms": 0.7924
+          },
+          {
+            "count": 24,
+            "op": "aten::fill_",
+            "self_ms": 0.7252
+          },
+          {
+            "count": 8,
+            "op": "aten::pow",
+            "self_ms": 0.6443
+          },
+          {
+            "count": 3,
+            "op": "aten::sub",
+            "self_ms": 0.5083
+          }
+        ],
+        "seq_len": 1024,
+        "wall_ms": {
+          "piecewise": 23.1368,
+          "standard": 34.4955
+        }
+      },
+      {
+        "dim": 64,
+        "isolated_ops_ms": {
+          "assign_cdist": 2.1069,
+          "fp32_cast": 0.0001,
+          "kmeans_cdist_iter": 1.6785,
+          "kmeans_lloyd": 8.5314,
+          "scores_softmax": 0.8291,
+          "second_moment": 18.2123
+        },
+        "num_anchors": 16,
+        "profiler_self_ms": [
+          {
+            "count": 10,
+            "op": "aten::bmm",
+            "self_ms": 19.5446
+          },
+          {
+            "count": 15,
+            "op": "aten::copy_",
+            "self_ms": 6.2139
+          },
+          {
+            "count": 9,
+            "op": "aten::mul",
+            "self_ms": 2.1732
+          },
+          {
+            "count": 6,
+            "op": "aten::scatter_add_",
+            "self_ms": 2.0246
+          },
+          {
+            "count": 5,
+            "op": "aten::gather",
+            "self_ms": 1.978
+          },
+          {
+            "count": 8,
+            "op": "aten::cat",
+            "self_ms": 1.8315
+          },
+          {
+            "count": 4608,
+            "op": "aten::select",
+            "self_ms": 1.7629
+          },
+          {
+            "count": 4,
+            "op": "aten::argmin",
+            "self_ms": 1.4
+          },
+          {
+            "count": 27,
+            "op": "aten::fill_",
+            "self_ms": 0.91
+          },
+          {
+            "count": 8,
+            "op": "aten::pow",
+            "self_ms": 0.7818
+          },
+          {
+            "count": 8,
+            "op": "aten::sum",
+            "self_ms": 0.6171
+          },
+          {
+            "count": 1,
+            "op": "aten::sort",
+            "self_ms": 0.5763
+          }
+        ],
+        "seq_len": 1024,
+        "wall_ms": {
+          "piecewise": 42.886,
+          "standard": 34.4955
+        }
+      },
+      {
+        "dim": 64,
+        "isolated_ops_ms": {},
+        "num_anchors": 1,
+        "profiler_self_ms": [
+          {
+            "count": 6,
+            "op": "aten::bmm",
+            "self_ms": 4.8824
+          },
+          {
+            "count": 1,
+            "op": "aten::sum",
+            "self_ms": 0.5971
+          },
+          {
+            "count": 3,
+            "op": "aten::mul",
+            "self_ms": 0.4491
+          },
+          {
+            "count": 2,
+            "op": "aten::sub",
+            "self_ms": 0.4294
+          },
+          {
+            "count": 1,
+            "op": "aten::add",
+            "self_ms": 0.3933
+          },
+          {
+            "count": 1152,
+            "op": "aten::select",
+            "self_ms": 0.3857
+          },
+          {
+            "count": 1179,
+            "op": "aten::as_strided",
+            "self_ms": 0.1206
+          },
+          {
+            "count": 1,
+            "op": "aten::_softmax",
+            "self_ms": 0.0896
+          },
+          {
+            "count": 6,
+            "op": "aten::matmul",
+            "self_ms": 0.0261
+          },
+          {
+            "count": 908,
+            "op": "aten::resolve_conj",
+            "self_ms": 0.0258
+          },
+          {
+            "count": 3,
+            "op": "aten::transpose",
+            "self_ms": 0.0157
+          },
+          {
+            "count": 8,
+            "op": "aten::unsqueeze",
+            "self_ms": 0.0152
+          }
+        ],
+        "seq_len": 2048,
+        "wall_ms": {
+          "piecewise": 6.3883,
+          "standard": 88.4737
+        }
+      },
+      {
+        "dim": 64,
+        "isolated_ops_ms": {
+          "assign_cdist": 3.0432,
+          "fp32_cast": 0.0001,
+          "kmeans_cdist_iter": 2.9063,
+          "kmeans_lloyd": 13.0624,
+          "scores_softmax": 1.1174,
+          "second_moment": 9.8345
+        },
+        "num_anchors": 4,
+        "profiler_self_ms": [
+          {
+            "count": 10,
+            "op": "aten::bmm",
+            "self_ms": 16.1205
+          },
+          {
+            "count": 15,
+            "op": "aten::copy_",
+            "self_ms": 5.2959
+          },
+          {
+            "count": 5,
+            "op": "aten::gather",
+            "self_ms": 4.5391
+          },
+          {
+            "count": 6,
+            "op": "aten::scatter_add_",
+            "self_ms": 4.0978
+          },
+          {
+            "count": 8,
+            "op": "aten::cat",
+            "self_ms": 2.7222
+          },
+          {
+            "count": 9,
+            "op": "aten::mul",
+            "self_ms": 2.6703
+          },
+          {
+            "count": 4,
+            "op": "aten::argmin",
+            "self_ms": 1.4138
+          },
+          {
+            "count": 8,
+            "op": "aten::pow",
+            "self_ms": 1.2103
+          },
+          {
+            "count": 3,
+            "op": "aten::sub",
+            "self_ms": 1.0707
+          },
+          {
+            "count": 2,
+            "op": "aten::scatter_",
+            "self_ms": 0.9798
+          },
+          {
+            "count": 2304,
+            "op": "aten::select",
+            "self_ms": 0.8352
+          },
+          {
+            "count": 8,
+            "op": "aten::sum",
+            "self_ms": 0.8183
+          }
+        ],
+        "seq_len": 2048,
+        "wall_ms": {
+          "piecewise": 40.2429,
+          "standard": 88.4737
+        }
+      },
+      {
+        "dim": 64,
+        "isolated_ops_ms": {
+          "assign_cdist": 3.5827,
+          "fp32_cast": 0.0001,
+          "kmeans_cdist_iter": 3.0085,
+          "kmeans_lloyd": 14.6185,
+          "scores_softmax": 1.7975,
+          "second_moment": 31.8279
+        },
+        "num_anchors": 16,
+        "profiler_self_ms": [
+          {
+            "count": 10,
+            "op": "aten::bmm",
+            "self_ms": 30.1203
+          },
+          {
+            "count": 15,
+            "op": "aten::copy_",
+            "self_ms": 11.2812
+          },
+          {
+            "count": 5,
+            "op": "aten::gather",
+            "self_ms": 5.0825
+          },
+          {
+            "count": 9,
+            "op": "aten::mul",
+            "self_ms": 4.1986
+          },
+          {
+            "count": 6,
+            "op": "aten::scatter_add_",
+            "self_ms": 3.0991
+          },
+          {
+            "count": 8,
+            "op": "aten::cat",
+            "self_ms": 2.8012
+          },
+          {
+            "count": 4,
+            "op": "aten::argmin",
+            "self_ms": 2.2995
+          },
+          {
+            "count": 2,
+            "op": "aten::scatter_",
+            "self_ms": 1.8278
+          },
+          {
+            "count": 4608,
+            "op": "aten::select",
+            "self_ms": 1.8223
+          },
+          {
+            "count": 8,
+            "op": "aten::pow",
+            "self_ms": 1.2889
+          },
+          {
+            "count": 27,
+            "op": "aten::fill_",
+            "self_ms": 1.1107
+          },
+          {
+            "count": 3,
+            "op": "aten::sub",
+            "self_ms": 1.0712
+          }
+        ],
+        "seq_len": 2048,
+        "wall_ms": {
+          "piecewise": 67.3291,
+          "standard": 88.4737
+        }
+      },
+      {
+        "dim": 128,
+        "isolated_ops_ms": {},
+        "num_anchors": 1,
+        "profiler_self_ms": [
+          {
+            "count": 6,
+            "op": "aten::bmm",
+            "self_ms": 3.2738
+          },
+          {
+            "count": 1152,
+            "op": "aten::select",
+            "self_ms": 0.3896
+          },
+          {
+            "count": 3,
+            "op": "aten::mul",
+            "self_ms": 0.229
+          },
+          {
+            "count": 2,
+            "op": "aten::sub",
+            "self_ms": 0.2206
+          },
+          {
+            "count": 1,
+            "op": "aten::sum",
+            "self_ms": 0.202
+          },
+          {
+            "count": 1,
+            "op": "aten::add",
+            "self_ms": 0.1746
+          },
+          {
+            "count": 1179,
+            "op": "aten::as_strided",
+            "self_ms": 0.1264
+          },
+          {
+            "count": 1,
+            "op": "aten::_softmax",
+            "self_ms": 0.0495
+          },
+          {
+            "count": 908,
+            "op": "aten::resolve_conj",
+            "self_ms": 0.025
+          },
+          {
+            "count": 6,
+            "op": "aten::matmul",
+            "self_ms": 0.021
+          },
+          {
+            "count": 8,
+            "op": "aten::unsqueeze",
+            "self_ms": 0.0126
+          },
+          {
+            "count": 12,
+            "op": "aten::expand",
+            "self_ms": 0.0108
+          }
+        ],
+        "seq_len": 512,
+        "wall_ms": {
+          "piecewise": 4.3966,
+          "standard": 12.0578
+        }
+      },
+      {
+        "dim": 128,
+        "isolated_ops_ms": {
+          "assign_cdist": 1.4245,
+          "fp32_cast": 0.0001,
+          "kmeans_cdist_iter": 1.3387,
+          "kmeans_lloyd": 6.9088,
+          "scores_softmax": 0.5345,
+          "second_moment": 6.7397
+        },
+        "num_anchors": 4,
+        "profiler_self_ms": [
+          {
+            "count": 10,
+            "op": "aten::bmm",
+            "self_ms": 12.0271
+          },
+          {
+            "count": 5,
+            "op": "aten::gather",
+            "self_ms": 2.7368
+          },
+          {
+            "count": 6,
+            "op": "aten::scatter_add_",
+            "self_ms": 2.1463
+          },
+          {
+            "count": 15,
+            "op": "aten::copy_",
+            "self_ms": 1.3959
+          },
+          {
+            "count": 8,
+            "op": "aten::cat",
+            "self_ms": 1.3462
+          },
+          {
+            "count": 9,
+            "op": "aten::mul",
+            "self_ms": 1.3139
+          },
+          {
+            "count": 2304,
+            "op": "aten::select",
+            "self_ms": 0.8479
+          },
+          {
+            "count": 2,
+            "op": "aten::scatter_",
+            "self_ms": 0.7383
+          },
+          {
+            "count": 8,
+            "op": "aten::pow",
+            "self_ms": 0.5641
+          },
+          {
+            "count": 8,
+            "op": "aten::sum",
+            "self_ms": 0.5486
+          },
+          {
+            "count": 4,
+            "op": "aten::argmin",
+            "self_ms": 0.5207
+          },
+          {
+            "count": 3,
+            "op": "aten::sub",
+            "self_ms": 0.4968
+          }
+        ],
+        "seq_len": 512,
+        "wall_ms": {
+          "piecewise": 26.6025,
+          "standard": 12.0578
+        }
+      },
+      {
+        "dim": 128,
+        "isolated_ops_ms": {
+          "assign_cdist": 1.6209,
+          "fp32_cast": 0.0001,
+          "kmeans_cdist_iter": 1.4571,
+          "kmeans_lloyd": 9.7559,
+          "scores_softmax": 0.6622,
+          "second_moment": 17.4531
+        },
+        "num_anchors": 16,
+        "profiler_self_ms": [
+          {
+            "count": 10,
+            "op": "aten::bmm",
+            "self_ms": 22.932
+          },
+          {
+            "count": 15,
+            "op": "aten::copy_",
+            "self_ms": 5.3914
+          },
+          {
+            "count": 6,
+            "op": "aten::scatter_add_",
+            "self_ms": 3.0633
+          },
+          {
+            "count": 5,
+            "op": "aten::gather",
+            "self_ms": 2.3421
+          },
+          {
+            "count": 9,
+            "op": "aten::mul",
+            "self_ms": 1.9978
+          },
+          {
+            "count": 4608,
+            "op": "aten::select",
+            "self_ms": 1.7318
+          },
+          {
+            "count": 8,
+            "op": "aten::cat",
+            "self_ms": 1.5545
+          },
+          {
+            "count": 4,
+            "op": "aten::argmin",
+            "self_ms": 0.7864
+          },
+          {
+            "count": 8,
+            "op": "aten::pow",
+            "self_ms": 0.7645
+          },
+          {
+            "count": 27,
+            "op": "aten::fill_",
+            "self_ms": 0.596
+          },
+          {
+            "count": 8,
+            "op": "aten::sum",
+            "self_ms": 0.5567
+          },
+          {
+            "count": 1,
+            "op": "aten::sort",
+            "self_ms": 0.5348
+          }
+        ],
+        "seq_len": 512,
+        "wall_ms": {
+          "piecewise": 44.3193,
+          "standard": 12.0578
+        }
+      },
+      {
+        "dim": 128,
+        "isolated_ops_ms": {},
+        "num_anchors": 1,
+        "profiler_self_ms": [
+          {
+            "count": 6,
+            "op": "aten::bmm",
+            "self_ms": 6.2311
+          },
+          {
+            "count": 1,
+            "op": "aten::sum",
+            "self_ms": 0.4224
+          },
+          {
+            "count": 3,
+            "op": "aten::mul",
+            "self_ms": 0.4162
+          },
+          {
+            "count": 1152,
+            "op": "aten::select",
+            "self_ms": 0.3697
+          },
+          {
+            "count": 2,
+            "op": "aten::sub",
+            "self_ms": 0.3656
+          },
+          {
+            "count": 1,
+            "op": "aten::add",
+            "self_ms": 0.3063
+          },
+          {
+            "count": 1179,
+            "op": "aten::as_strided",
+            "self_ms": 0.1206
+          },
+          {
+            "count": 1,
+            "op": "aten::_softmax",
+            "self_ms": 0.0534
+          },
+          {
+            "count": 6,
+            "op": "aten::matmul",
+            "self_ms": 0.028
+          },
+          {
+            "count": 908,
+            "op": "aten::resolve_conj",
+            "self_ms": 0.0233
+          },
+          {
+            "count": 8,
+            "op": "aten::unsqueeze",
+            "self_ms": 0.0121
+          },
+          {
+            "count": 12,
+            "op": "aten::expand",
+            "self_ms": 0.0118
+          }
+        ],
+        "seq_len": 1024,
+        "wall_ms": {
+          "piecewise": 7.8862,
+          "standard": 31.4744
+        }
+      },
+      {
+        "dim": 128,
+        "isolated_ops_ms": {
+          "assign_cdist": 2.9212,
+          "fp32_cast": 0.0002,
+          "kmeans_cdist_iter": 2.7385,
+          "kmeans_lloyd": 12.2335,
+          "scores_softmax": 1.0871,
+          "second_moment": 12.7265
+        },
+        "num_anchors": 4,
+        "profiler_self_ms": [
+          {
+            "count": 10,
+            "op": "aten::bmm",
+            "self_ms": 20.9563
+          },
+          {
+            "count": 5,
+            "op": "aten::gather",
+            "self_ms": 3.9649
+          },
+          {
+            "count": 6,
+            "op": "aten::scatter_add_",
+            "self_ms": 3.2952
+          },
+          {
+            "count": 15,
+            "op": "aten::copy_",
+            "self_ms": 2.8565
+          },
+          {
+            "count": 9,
+            "op": "aten::mul",
+            "self_ms": 2.6215
+          },
+          {
+            "count": 8,
+            "op": "aten::cat",
+            "self_ms": 2.399
+          },
+          {
+            "count": 8,
+            "op": "aten::pow",
+            "self_ms": 1.151
+          },
+          {
+            "count": 3,
+            "op": "aten::sub",
+            "self_ms": 1.0585
+          },
+          {
+            "count": 2,
+            "op": "aten::scatter_",
+            "self_ms": 0.9726
+          },
+          {
+            "count": 27,
+            "op": "aten::fill_",
+            "self_ms": 0.9419
+          },
+          {
+            "count": 8,
+            "op": "aten::sum",
+            "self_ms": 0.8825
+          },
+          {
+            "count": 2304,
+            "op": "aten::select",
+            "self_ms": 0.8304
+          }
+        ],
+        "seq_len": 1024,
+        "wall_ms": {
+          "piecewise": 46.3578,
+          "standard": 31.4744
+        }
+      },
+      {
+        "dim": 128,
+        "isolated_ops_ms": {
+          "assign_cdist": 3.1894,
+          "fp32_cast": 0.0001,
+          "kmeans_cdist_iter": 2.8431,
+          "kmeans_lloyd": 13.2905,
+          "scores_softmax": 1.4288,
+          "second_moment": 31.6704
+        },
+        "num_anchors": 16,
+        "profiler_self_ms": [
+          {
+            "count": 10,
+            "op": "aten::bmm",
+            "self_ms": 35.7691
+          },
+          {
+            "count": 15,
+            "op": "aten::copy_",
+            "self_ms": 10.8131
+          },
+          {
+            "count": 9,
+            "op": "aten::mul",
+            "self_ms": 4.1813
+          },
+          {
+            "count": 6,
+            "op": "aten::scatter_add_",
+            "self_ms": 4.0724
+          },
+          {
+            "count": 5,
+            "op": "aten::gather",
+            "self_ms": 3.7162
+          },
+          {
+            "count": 8,
+            "op": "aten::cat",
+            "self_ms": 2.5714
+          },
+          {
+            "count": 4608,
+            "op": "aten::select",
+            "self_ms": 1.6566
+          },
+          {
+            "count": 4,
+            "op": "aten::argmin",
+            "self_ms": 1.5014
+          },
+          {
+            "count": 27,
+            "op": "aten::fill_",
+            "self_ms": 1.2717
+          },
+          {
+            "count": 8,
+            "op": "aten::pow",
+            "self_ms": 1.2489
+          },
+          {
+            "count": 3,
+            "op": "aten::sub",
+            "self_ms": 1.0917
+          },
+          {
+            "count": 2,
+            "op": "aten::scatter_",
+            "self_ms": 0.9645
+          }
+        ],
+        "seq_len": 1024,
+        "wall_ms": {
+          "piecewise": 72.3172,
+          "standard": 31.4744
+        }
+      },
+      {
+        "dim": 128,
+        "isolated_ops_ms": {},
+        "num_anchors": 1,
+        "profiler_self_ms": [
+          {
+            "count": 6,
+            "op": "aten::bmm",
+            "self_ms": 11.7051
+          },
+          {
+            "count": 1,
+            "op": "aten::sum",
+            "self_ms": 0.7981
+          },
+          {
+            "count": 2,
+            "op": "aten::sub",
+            "self_ms": 0.7059
+          },
+          {
+            "count": 3,
+            "op": "aten::mul",
+            "self_ms": 0.6928
+          },
+          {
+            "count": 1,
+            "op": "aten::add",
+            "self_ms": 0.616
+          },
+          {
+            "count": 1152,
+            "op": "aten::select",
+            "self_ms": 0.3909
+          },
+          {
+            "count": 1179,
+            "op": "aten::as_strided",
+            "self_ms": 0.1305
+          },
+          {
+            "count": 1,
+            "op": "aten::_softmax",
+            "self_ms": 0.0634
+          },
+          {
+            "count": 6,
+            "op": "aten::matmul",
+            "self_ms": 0.0244
+          },
+          {
+            "count": 908,
+            "op": "aten::resolve_conj",
+            "self_ms": 0.0242
+          },
+          {
+            "count": 1,
+            "op": "aten::mean",
+            "self_ms": 0.0156
+          },
+          {
+            "count": 8,
+            "op": "aten::unsqueeze",
+            "self_ms": 0.0144
+          }
+        ],
+        "seq_len": 2048,
+        "wall_ms": {
+          "piecewise": 14.9481,
+          "standard": 112.3056
+        }
+      },
+      {
+        "dim": 128,
+        "isolated_ops_ms": {
+          "assign_cdist": 5.2679,
+          "fp32_cast": 0.0001,
+          "kmeans_cdist_iter": 5.1081,
+          "kmeans_lloyd": 22.5906,
+          "scores_softmax": 2.133,
+          "second_moment": 17.3693
+        },
+        "num_anchors": 4,
+        "profiler_self_ms": [
+          {
+            "count": 10,
+            "op": "aten::bmm",
+            "self_ms": 32.0723
+          },
+          {
+            "count": 5,
+            "op": "aten::gather",
+            "self_ms": 7.5104
+          },
+          {
+            "count": 6,
+            "op": "aten::scatter_add_",
+            "self_ms": 6.1114
+          },
+          {
+            "count": 15,
+            "op": "aten::copy_",
+            "self_ms": 5.6165
+          },
+          {
+            "count": 9,
+            "op": "aten::mul",
+            "self_ms": 5.3387
+          },
+          {
+            "count": 8,
+            "op": "aten::cat",
+            "self_ms": 3.8381
+          },
+          {
+            "count": 8,
+            "op": "aten::pow",
+            "self_ms": 2.4454
+          },
+          {
+            "count": 3,
+            "op": "aten::sub",
+            "self_ms": 2.0119
+          },
+          {
+            "count": 2,
+            "op": "aten::scatter_",
+            "self_ms": 1.824
+          },
+          {
+            "count": 8,
+            "op": "aten::sum",
+            "self_ms": 1.5126
+          },
+          {
+            "count": 4,
+            "op": "aten::argmin",
+            "self_ms": 1.0781
+          },
+          {
+            "count": 27,
+            "op": "aten::fill_",
+            "self_ms": 1.023
+          }
+        ],
+        "seq_len": 2048,
+        "wall_ms": {
+          "piecewise": 74.2692,
+          "standard": 112.3056
+        }
+      },
+      {
+        "dim": 128,
+        "isolated_ops_ms": {
+          "assign_cdist": 5.9895,
+          "fp32_cast": 0.0001,
+          "kmeans_cdist_iter": 5.0965,
+          "kmeans_lloyd": 24.7838,
+          "scores_softmax": 2.4784,
+          "second_moment": 57.4088
+        },
+        "num_anchors": 16,
+        "profiler_self_ms": [
+          {
+            "count": 10,
+            "op": "aten::bmm",
+            "self_ms": 57.6736
+          },
+          {
+            "count": 15,
+            "op": "aten::copy_",
+            "self_ms": 21.7569
+          },
+          {
+            "count": 9,
+            "op": "aten::mul",
+            "self_ms": 8.5773
+          },
+          {
+            "count": 5,
+            "op": "aten::gather",
+            "self_ms": 7.2808
+          },
+          {
+            "count": 6,
+            "op": "aten::scatter_add_",
+            "self_ms": 5.9558
+          },
+          {
+            "count": 8,
+            "op": "aten::cat",
+            "self_ms": 4.071
+          },
+          {
+            "count": 4,
+            "op": "aten::argmin",
+            "self_ms": 2.6143
+          },
+          {
+            "count": 8,
+            "op": "aten::pow",
+            "self_ms": 2.5367
+          },
+          {
+            "count": 3,
+            "op": "aten::sub",
+            "self_ms": 2.112
+          },
+          {
+            "count": 2,
+            "op": "aten::scatter_",
+            "self_ms": 1.8478
+          },
+          {
+            "count": 4608,
+            "op": "aten::select",
+            "self_ms": 1.66
+          },
+          {
+            "count": 27,
+            "op": "aten::fill_",
+            "self_ms": 1.5111
+          }
+        ],
+        "seq_len": 2048,
+        "wall_ms": {
+          "piecewise": 124.684,
+          "standard": 112.3056
+        }
+      }
+    ]
+  },
+  "metrics": {
+    "attribution": {
+      "d128_n1024_m16": {
+        "assign_frac": 0.044,
+        "einsum_frac": 0.438,
+        "einsum_over_kmeans": 2.383,
+        "kmeans_frac": 0.184
+      },
+      "d128_n1024_m4": {
+        "assign_frac": 0.063,
+        "einsum_frac": 0.275,
+        "einsum_over_kmeans": 1.04,
+        "kmeans_frac": 0.264
+      },
+      "d128_n2048_m16": {
+        "assign_frac": 0.048,
+        "einsum_frac": 0.46,
+        "einsum_over_kmeans": 2.316,
+        "kmeans_frac": 0.199
+      },
+      "d128_n2048_m4": {
+        "assign_frac": 0.071,
+        "einsum_frac": 0.234,
+        "einsum_over_kmeans": 0.769,
+        "kmeans_frac": 0.304
+      },
+      "d128_n512_m16": {
+        "assign_frac": 0.037,
+        "einsum_frac": 0.394,
+        "einsum_over_kmeans": 1.789,
+        "kmeans_frac": 0.22
+      },
+      "d128_n512_m4": {
+        "assign_frac": 0.054,
+        "einsum_frac": 0.253,
+        "einsum_over_kmeans": 0.976,
+        "kmeans_frac": 0.26
+      },
+      "d64_n1024_m16": {
+        "assign_frac": 0.049,
+        "einsum_frac": 0.425,
+        "einsum_over_kmeans": 2.135,
+        "kmeans_frac": 0.199
+      },
+      "d64_n1024_m4": {
+        "assign_frac": 0.072,
+        "einsum_frac": 0.221,
+        "einsum_over_kmeans": 0.691,
+        "kmeans_frac": 0.32
+      },
+      "d64_n2048_m16": {
+        "assign_frac": 0.053,
+        "einsum_frac": 0.473,
+        "einsum_over_kmeans": 2.177,
+        "kmeans_frac": 0.217
+      },
+      "d64_n2048_m4": {
+        "assign_frac": 0.076,
+        "einsum_frac": 0.244,
+        "einsum_over_kmeans": 0.753,
+        "kmeans_frac": 0.325
+      },
+      "d64_n512_m16": {
+        "assign_frac": 0.048,
+        "einsum_frac": 0.378,
+        "einsum_over_kmeans": 1.857,
+        "kmeans_frac": 0.203
+      },
+      "d64_n512_m4": {
+        "assign_frac": 0.068,
+        "einsum_frac": 0.192,
+        "einsum_over_kmeans": 0.616,
+        "kmeans_frac": 0.311
+      }
+    }
+  },
+  "schema_version": 1
+}

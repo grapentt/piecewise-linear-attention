@@ -212,6 +212,7 @@ def _build_piecewise_kmeans(
     kmeans_iters=3,
     build_topp=None,
     build_reduced_d=None,
+    anchor_refresh_every=1,
     **_ignored,
 ) -> BaseAttention:
     """Multi-anchor piecewise attention with k-means-selected anchors.
@@ -220,15 +221,26 @@ def _build_piecewise_kmeans(
     truncations (nucleus / query-residual low-rank); both default to ``None``
     (exact dense build) and are mutually exclusive. Exposing them by name here
     makes them loggable as run configuration.
+
+    ``anchor_refresh_every`` opts into anchor caching: the k-means centroids are
+    recomputed only every ``anchor_refresh_every`` forwards and reused in between
+    (``1``, the default, recomputes every forward — no caching). Because the
+    recomputed Lloyd clustering is the dominant term at low anchor count, this
+    amortizes that cost across steps at a small fidelity cost. See
+    :class:`CachedAnchor`.
     """
-    from .anchors import KMeansAnchor
+    from .anchors import CachedAnchor, KMeansAnchor
+
+    strategy: object = KMeansAnchor(k=num_anchors, iters=kmeans_iters)
+    if anchor_refresh_every > 1:
+        strategy = CachedAnchor(strategy, refresh_every=anchor_refresh_every)
 
     return PiecewiseAttention(
         dim=dim,
         dropout=dropout,
         scale=scale,
         causal=causal,
-        anchor_strategy=KMeansAnchor(k=num_anchors, iters=kmeans_iters),
+        anchor_strategy=strategy,
         build_topp=build_topp,
         build_reduced_d=build_reduced_d,
     )

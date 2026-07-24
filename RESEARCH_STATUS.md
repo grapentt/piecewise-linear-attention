@@ -107,7 +107,77 @@ mean rather than the max has a `~1.5–2.5×` build FLOP ceiling (larger at a lo
 (see below). Reproduced by the real-activation fidelity harness; distribution in
 `results/real_activation_fidelity_nucleus.json`.
 
-## Accuracy
+### Where the `m>1` time actually goes: clustering-bound at low `m`, einsum-bound at high `m`
+
+The `O(m·n·d²)` figure above is the *asymptotic* apply cost, but it is not the
+whole per-forward bill at low anchor count. An op-level CPU profile at the
+`anchor_cost_sweep` shapes (`results/multianchor_profile.json`,
+`run_multianchor_profile.py`) splits the `piecewise_kmeans` forward across its
+suspects and finds the dominant term **shifts with `m`**:
+
+| term | `m=4` share | `m=16` share |
+|---|---|---|
+| k-means Lloyd loop (recomputed every forward) | **29–32%** | 18–22% |
+| second-moment einsum `bmn,bnd,bne->bmde` | 19–27% | **37–48%** |
+| nearest-anchor `cdist` (routing) | 5–8% | 4–5% |
+| fp32 cast (`Q.float()`) | ~0% (negligible on CPU) | ~0% |
+
+At `m=4` the `einsum/kmeans` ratio is `0.6–0.85` (**clustering-bound**); by
+`m=16` it is `1.8–2.4` (**einsum-bound**), and it keeps growing with `m·d²`. The
+clustering cost is nearly flat in `m` — it is driven by the Lloyd `cdist`, which
+is `O(b·n·d)` with `m` only a tiny inner dimension — so it is a *fixed
+per-forward overhead* that the einsum overtakes as `m` climbs. The `torch.profiler`
+self-time agrees (top ops: `aten::bmm`, `aten::gather`, `aten::scatter_add_`),
+and the totals reproduce the committed `anchor_cost_sweep.json` (e.g. `d=64,
+n=512, m=4`: 12.3 ms measured vs 12.9 ms committed). The **fp32 cast is not a
+factor** on CPU — everything is already fp32, so the upcast is free; it is
+measured only to retire it as a suspect.
+
+Two consequences: the `d²` low-rank lever below attacks the term that dominates
+at high `m` (the einsum), while at low `m` — the regime the ListOps run used
+(`m=4`) — the biggest single lever is not the einsum at all but the fact that
+**k-means is recomputed from scratch every forward**.
+
+### Anchor reuse: recovers the clustering term at low `m`, near-free in accuracy
+
+Anchor selection runs under `no_grad` and returns detached centroids (the
+gradient path is `A(a) + J(a)·(q − a)`, differentiable in `Q,K,V` regardless of
+how `a` was chosen), so the centroids can be cached across forwards without
+touching autograd. `CachedAnchor` wraps any strategy and refreshes the centroids
+only every `N` forwards (opt-in via `anchor_refresh_every` on the
+`piecewise_kmeans` builder; `1` = recompute every forward, the default). Measured
+over a drifting-input loop at the ListOps-like shape (`d=128, n=2048, m=4`;
+`results/anchor_reuse.json`, `run_anchor_reuse.py`), accuracy is relative error
+to exact softmax and the penalty is versus fresh clustering every step:
+
+| config | speedup vs fresh | accuracy penalty |
+|---|---|---|
+| cached, refresh every 16 | **1.47×** | **+0.09%** |
+| cached, refresh every 8 | 1.41× | +0.09% |
+| cached, refresh every 4 | 1.36× | +0.09% |
+| fewer Lloyd iters (3→1) | 1.17× | +0.18% |
+| no Lloyd (stride init only) | 1.34× | **+121%** ❌ |
+
+Caching buys a **1.4× forward speedup for a +0.09% fidelity cost** at `m=4` —
+essentially free, because the anchors only choose *where* the first-order
+expansion is centered, and a slightly-stale centroid is still a comparably-good
+center (both fresh and stale are ~0.5 rel-err to softmax on these synthetic
+inputs; the *difference* between them is what stays tiny). Dropping the Lloyd
+refinement entirely is fast but destroys accuracy (`+121%`), so the refinement
+matters — you just need not redo it every step.
+
+**Honest scope of the win.** Reuse only recovers the *clustering* term, so it
+helps most exactly where clustering dominates (**low `m`**) and does little at
+high `m`, where the einsum — untouched by caching — takes over. It therefore does
+**not** explain or fix the `m=4` GPU slowdown that motivated this investigation
+(ListOps `m=4` ≈ 2.1× slower than dense softmax on A100 at `n=2048`): on GPU the
+dense `O(n²)` softmax parallelizes extremely well and stays cheap, while the
+serialized einsum + clustering do not, so the GPU bottleneck is the einsum, not
+the clustering. Caching is a real CPU-side and low-`m` training-throughput win
+(and on CPU at `n≥1024` `m=4` is already *faster* than dense softmax, which
+caching widens), but the `d²` lever below is what the high-`m`/GPU regime needs.
+
+
 
 Relative error to exact softmax, on two input regimes that give **opposite**
 verdicts on whether anchor count matters:
